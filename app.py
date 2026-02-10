@@ -4,4 +4,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Hola 👋 Compañero está vivo"
+    return "Compañero activo"
+
+if __name__ == "__main__":
+    app.run()
