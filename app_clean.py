@@ -1,14 +1,6 @@
 from flask import Flask, request, render_template_string
 import os
 from datetime import datetime
-from flask import Flask, request, render_template_string
-import os
-from datetime import datetime
-from pdf_engine import detectar_tipo_pdf
-
-app = Flask(__name__)
-import os
-from datetime import datetime
 
 app = Flask(__name__)
 
@@ -42,12 +34,10 @@ def home():
             carpeta_fecha = os.path.join(UPLOAD_FOLDER, fecha)
             os.makedirs(carpeta_fecha, exist_ok=True)
 
-            36     ruta = os.path.join(carpeta_fecha, archivo.filename)
-37     archivo.save(ruta)
+            ruta = os.path.join(carpeta_fecha, archivo.filename)
+            archivo.save(ruta)
 
-38     tipo = detectar_tipo_pdf(ruta)
-
-39     mensaje = f"PDF guardado correctamente en {fecha}. Tipo detectado: {tipo}"
+            mensaje = f"PDF guardado correctamente en {fecha}."
 
     return render_template_string(HTML, mensaje=mensaje)
 
