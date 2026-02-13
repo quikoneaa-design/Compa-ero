@@ -37,10 +37,12 @@ def home():
             carpeta_fecha = os.path.join(UPLOAD_FOLDER, fecha)
             os.makedirs(carpeta_fecha, exist_ok=True)
 
-            ruta = os.path.join(carpeta_fecha, archivo.filename)
-            archivo.save(ruta)
+            36     ruta = os.path.join(carpeta_fecha, archivo.filename)
+37     archivo.save(ruta)
 
-            mensaje = f"PDF guardado correctamente en {fecha}."
+38     tipo = detectar_tipo_pdf(ruta)
+
+39     mensaje = f"PDF guardado correctamente en {fecha}. Tipo detectado: {tipo}"
 
     return render_template_string(HTML, mensaje=mensaje)
 
