@@ -20,14 +20,26 @@ HTML = """
 @app.route("/", methods=["GET", "POST"])
 def home():
     mensaje = ""
-    if request.method == "POST":
-        archivo = request.files.get("file")
-        if archivo and archivo.filename.endswith(".pdf"):
-            ruta = os.path.join(UPLOAD_FOLDER, archivo.filename)
-            archivo.save(ruta)
-            mensaje = f"Archivo '{archivo.filename}' subido correctamente."
-        else:
-            mensaje = "Solo se permiten archivos PDF."
+if request.method == "POST":
+    archivo = request.files.get("file")
+
+    if not archivo or archivo.filename == "":
+        mensaje = "No se seleccionó ningún archivo."
+    elif not archivo.filename.lower().endswith(".pdf"):
+        mensaje = "Solo se permiten archivos PDF."
+    else:
+        from datetime import datetime
+
+        # Crear carpeta por fecha
+        fecha = datetime.now().strftime("%Y-%m-%d")
+        carpeta_fecha = os.path.join(UPLOAD_FOLDER, fecha)
+        os.makedirs(carpeta_fecha, exist_ok=True)
+
+        # Guardar archivo
+        ruta = os.path.join(carpeta_fecha, archivo.filename)
+        archivo.save(ruta)
+
+        mensaje = f"PDF guardado correctamente en {fecha}."
     return render_template_string(HTML, mensaje=mensaje)
 
 if __name__ == "__main__":
