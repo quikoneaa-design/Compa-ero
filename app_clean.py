@@ -1,6 +1,9 @@
 from flask import Flask, request, render_template_string
 import os
 from datetime import datetime
+from pdf_engine import detectar_tipo_pdffrom flask import Flask, request, render_template_string
+import os
+from datetime import datetime
 
 app = Flask(__name__)
 
