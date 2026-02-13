@@ -40,7 +40,7 @@ if request.method == "POST":
         archivo.save(ruta)
 
         mensaje = f"PDF guardado correctamente en {fecha}."
-    return render_template_string(HTML, mensaje=mensaje)
+        return render_template_string(HTML, mensaje=mensaje)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
