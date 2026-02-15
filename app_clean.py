@@ -48,4 +48,26 @@ def home():
         if not archivo or archivo.filename == "":
             mensaje = "No se seleccionó ningún archivo."
         elif not archivo.filename.lower().endswith(".pdf"):
-            mensaje = "
+            mensaje = "Solo se permiten archivos PDF."
+        else:
+            fecha = datetime.now().strftime("%Y-%m-%d")
+            carpeta_fecha = os.path.join(UPLOAD_FOLDER, fecha)
+            os.makedirs(carpeta_fecha, exist_ok=True)
+
+            ruta = os.path.join(carpeta_fecha, archivo.filename)
+            archivo.save(ruta)
+
+            tipo_pdf = detectar_tipo_pdf(ruta)
+
+            if tipo_pdf == "editable":
+                mensaje = f"PDF guardado correctamente en {fecha}. Tipo detectado: PDF editable."
+            elif tipo_pdf == "escaneado":
+                mensaje = f"PDF guardado correctamente en {fecha}. Tipo detectado: PDF escaneado (requiere OCR)."
+            else:
+                mensaje = f"PDF guardado correctamente en {fecha}. No se pudo analizar el tipo."
+
+    return render_template_string(HTML, mensaje=mensaje)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
