@@ -1,8 +1,6 @@
 from flask import Flask, request, render_template_string, send_file
 import os
 import fitz  # PyMuPDF
-import requests
-import base64
 import json
 from datetime import datetime
 
@@ -14,7 +12,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 PERFIL_PATH = "perfil.json"
 
 # ==============================
-# CARGA PERFIL
+# PERFIL
 # ==============================
 
 def cargar_perfil():
@@ -67,26 +65,28 @@ def rellenar_formulario(ruta_pdf, ruta_salida):
     doc = fitz.open(ruta_pdf)
 
     for pagina in doc:
-        for widget in pagina.widgets():
-            nombre = widget.field_name.lower()
+        widgets = pagina.widgets()
+        if widgets:
+            for widget in widgets:
+                nombre = (widget.field_name or "").lower()
 
-            if "nombre" in nombre:
-                widget.field_value = perfil["identidad"]["nombre_completo"]
+                if "nombre" in nombre:
+                    widget.field_value = perfil["identidad"]["nombre_completo"]
 
-            elif "dni" in nombre:
-                widget.field_value = perfil["identidad"]["dni"]
+                elif "dni" in nombre:
+                    widget.field_value = perfil["identidad"]["dni"]
 
-            elif "email" in nombre:
-                widget.field_value = perfil["contacto"]["email"]
+                elif "email" in nombre:
+                    widget.field_value = perfil["contacto"]["email"]
 
-            elif "telefono" in nombre:
-                widget.field_value = perfil["contacto"]["telefono"]
+                elif "telefono" in nombre:
+                    widget.field_value = perfil["contacto"]["telefono"]
 
     doc.save(ruta_salida)
     doc.close()
 
 # ==============================
-# MOTOR A - COORDENADAS
+# MOTOR A - COORDENADAS (FALLBACK)
 # ==============================
 
 def rellenar_por_coordenadas(ruta_pdf, ruta_salida):
@@ -105,38 +105,6 @@ def rellenar_por_coordenadas(ruta_pdf, ruta_salida):
     doc.close()
 
 # ==============================
-# OCR GOOGLE VISION (MANTENIDO)
-# ==============================
-
-def hacer_ocr_google(ruta_pdf):
-    try:
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            return "⚠️ No hay API Key configurada."
-
-        with open(ruta_pdf, "rb") as f:
-            contenido = base64.b64encode(f.read()).decode()
-
-        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-
-        data = {
-            "requests": [
-                {
-                    "image": {"content": contenido},
-                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
-                }
-            ]
-        }
-
-        response = requests.post(url, json=data)
-        resultado = response.json()
-
-        return resultado["responses"][0]["fullTextAnnotation"]["text"]
-
-    except:
-        return "Error realizando OCR."
-
-# ==============================
 # RUTA PRINCIPAL
 # ==============================
 
@@ -153,16 +121,23 @@ def home():
             ruta_original = os.path.join(UPLOAD_FOLDER, archivo.filename)
             archivo.save(ruta_original)
 
-            nombre_salida = archivo.filename.replace(".pdf", "_RELLENADO.pdf")
+            # Generar nombre de salida seguro
+            base, ext = os.path.splitext(archivo.filename)
+            nombre_salida = f"{base}_RELLENADO.pdf"
             ruta_salida = os.path.join(UPLOAD_FOLDER, nombre_salida)
 
+            # Motor híbrido C
             if tiene_formulario(ruta_original):
                 rellenar_formulario(ruta_original, ruta_salida)
-                return send_file(ruta_salida, as_attachment=True)
-
             else:
                 rellenar_por_coordenadas(ruta_original, ruta_salida)
-                return send_file(ruta_salida, as_attachment=True)
+
+            return send_file(
+                ruta_salida,
+                as_attachment=True,
+                download_name=nombre_salida,
+                mimetype="application/pdf"
+            )
 
     return render_template_string(HTML, mensaje=mensaje)
 
