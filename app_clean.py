@@ -121,15 +121,12 @@ def autorrellenar():
 
     fontsize = 10
 
-    # Ajuste vertical fino
     altura_caja = caja_objetivo.y1 - caja_objetivo.y0
-    y = caja_objetivo.y0 + (altura_caja / 2) + (fontsize / 2) - 2
 
-    pagina.insert_text(
-        (x, y),
-        dni,
-        fontsize=fontsize
-    )
+    # Ajuste vertical fino definitivo
+    y = caja_objetivo.y0 + (altura_caja / 2) + (fontsize / 2) - 5
+
+    pagina.insert_text((x, y), dni, fontsize=fontsize)
 
     nuevo_nombre = os.path.basename(ULTIMO_ARCHIVO).replace(".pdf", "_AUTORRELLENADO.pdf")
     nueva_ruta = os.path.join(UPLOAD_FOLDER, nuevo_nombre)
