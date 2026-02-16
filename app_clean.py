@@ -1,8 +1,8 @@
-from flask import Flask, request, render_template_string, redirect, url_for
+from flask import Flask, request, render_template_string, redirect, url_for, send_from_directory
 import os
 from datetime import datetime
 import json
-import fitz  # PyMuPDF
+import fitz
 
 app = Flask(__name__)
 
@@ -10,6 +10,7 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ULTIMO_ARCHIVO = None
+ULTIMO_AUTORRELLENADO = None
 
 # =========================
 # CARGA PERFIL
@@ -46,6 +47,14 @@ HTML = """
   </form>
 {% endif %}
 
+{% if autorrellenado %}
+  <hr>
+  <p><strong>PDF autorrellenado generado:</strong></p>
+  <a href="{{ url_for('descargar', nombre=autorrellenado) }}">
+    Descargar PDF autorrellenado
+  </a>
+{% endif %}
+
 <p style="color:green;">{{ mensaje }}</p>
 """
 
@@ -74,21 +83,22 @@ def home():
         HTML,
         perfil=PERFIL,
         archivo=ULTIMO_ARCHIVO,
+        autorrellenado=None,
         mensaje=mensaje
     )
 
 # =========================
-# AUTORRELLENAR MOTOR
+# AUTORRELLENAR
 # =========================
 @app.route("/autorrellenar", methods=["POST"])
 def autorrellenar():
-    global ULTIMO_ARCHIVO
+    global ULTIMO_ARCHIVO, ULTIMO_AUTORRELLENADO
 
     if not ULTIMO_ARCHIVO:
         return redirect(url_for("home"))
 
     doc = fitz.open(ULTIMO_ARCHIVO)
-    pagina = doc[0]  # Solo página 1 en esta primera versión
+    pagina = doc[0]
 
     nombre = PERFIL["identidad"]["nombre_completo"]
     dni = PERFIL["identidad"]["dni"]
@@ -104,15 +114,31 @@ def autorrellenar():
             y = rect.y0
             pagina.insert_text((x, y), texto_insertar, fontsize=10)
 
-    # Búsquedas adaptadas al modelo Andratx
     insertar_derecha("DNI", dni)
     insertar_derecha("Nom", nombre)
     insertar_derecha("Descripció", actividad)
     insertar_derecha("DATA", fecha_texto)
     insertar_derecha("FECHA", fecha_texto)
 
-    nuevo_nombre = ULTIMO_ARCHIVO.replace(".pdf", "_AUTORRELLENADO.pdf")
-    doc.save(nuevo_nombre)
+    nuevo_nombre = os.path.basename(ULTIMO_ARCHIVO).replace(".pdf", "_AUTORRELLENADO.pdf")
+    nueva_ruta = os.path.join(UPLOAD_FOLDER, nuevo_nombre)
+
+    doc.save(nueva_ruta)
     doc.close()
 
-    return f"PDF autorrellenado generado: {nuevo_nombre}"
+    ULTIMO_AUTORRELLENADO = nuevo_nombre
+
+    return render_template_string(
+        HTML,
+        perfil=PERFIL,
+        archivo=ULTIMO_ARCHIVO,
+        autorrellenado=ULTIMO_AUTORRELLENADO,
+        mensaje="Autorrellenado completado."
+    )
+
+# =========================
+# DESCARGA
+# =========================
+@app.route("/descargar/<nombre>")
+def descargar(nombre):
+    return send_from_directory(UPLOAD_FOLDER, nombre, as_attachment=True)
