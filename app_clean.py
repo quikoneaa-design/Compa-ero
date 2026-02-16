@@ -1,25 +1,32 @@
 from flask import Flask, request, render_template_string
 import os
 import fitz  # PyMuPDF
-import requests
 import base64
-import re
+import requests
+from datetime import datetime
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-HTML = """
-<!doctype html>
-<title>Compañero</title>
-<h1>Subir solicitud PDF</h1>
-<form method=post enctype=multipart/form-data>
-  <input type=file name=file>
-  <input type=submit value=Subir>
-</form>
-<p>{{ mensaje|safe }}</p>
-"""
+# ==============================
+# BASE DE DATOS PERSONAL FIJA
+# ==============================
+
+DATOS_USUARIO = {
+    "nombre": "Enrique Afonso Álvarez",
+    "dni": "50753101J",
+    "actividad": "Venta de joyería y bisutería creativa",
+    "producto": "Joyería/bisutería realizada con conchas marinas naturales y piedras semipreciosas",
+    "parada_propia": "Sí",
+    "manipulador_alimentos": "No",
+    "lugar": "Palma"
+}
+
+# ==============================
+# DETECTAR TIPO DE PDF
+# ==============================
 
 def detectar_tipo_pdf(ruta_pdf):
     try:
@@ -39,60 +46,56 @@ def detectar_tipo_pdf(ruta_pdf):
     except Exception:
         return "error"
 
+# ==============================
+# OCR GOOGLE VISION
+# ==============================
 
-def ocr_google_vision(ruta_pdf):
-    api_key = os.environ.get("GOOGLE_VISION_API_KEY")
+def hacer_ocr_google(ruta_pdf):
+    api_key = os.getenv("GOOGLE_VISION_API_KEY")
 
     if not api_key:
         return "Error: API Key no configurada"
 
+    with open(ruta_pdf, "rb") as f:
+        contenido = base64.b64encode(f.read()).decode()
+
+    url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
+
+    payload = {
+        "requests": [
+            {
+                "image": {"content": contenido},
+                "features": [{"type": "TEXT_DETECTION"}]
+            }
+        ]
+    }
+
+    response = requests.post(url, json=payload)
+    resultado = response.json()
+
     try:
-        doc = fitz.open(ruta_pdf)
-        pagina = doc.load_page(0)
-        pix = pagina.get_pixmap()
-        imagen_bytes = pix.tobytes("png")
-        doc.close()
+        return resultado["responses"][0]["fullTextAnnotation"]["text"]
+    except:
+        return "No se detectó texto."
 
-        contenido = base64.b64encode(imagen_bytes).decode("utf-8")
+# ==============================
+# HTML
+# ==============================
 
-        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
+HTML = """
+<!doctype html>
+<title>Compañero</title>
+<h1>Subir solicitud PDF</h1>
+<form method=post enctype=multipart/form-data>
+  <input type=file name=file>
+  <input type=submit value=Subir>
+</form>
+<p>{{ mensaje|safe }}</p>
+"""
 
-        payload = {
-            "requests": [
-                {
-                    "image": {"content": contenido},
-                    "features": [{"type": "TEXT_DETECTION"}]
-                }
-            ]
-        }
-
-        response = requests.post(url, json=payload)
-        resultado = response.json()
-
-        texto = resultado["responses"][0]["fullTextAnnotation"]["text"]
-        return texto
-
-    except Exception as e:
-        return f"Error OCR: {str(e)}"
-
-
-def extraer_datos_basicos(texto):
-    datos = {}
-
-    dni = re.search(r'\b\d{8}[A-Za-z]\b', texto)
-    if dni:
-        datos["DNI"] = dni.group()
-
-    telefono = re.search(r'\b\d{9}\b', texto)
-    if telefono:
-        datos["Telefono"] = telefono.group()
-
-    email = re.search(r'\b[\w\.-]+@[\w\.-]+\.\w+\b', texto)
-    if email:
-        datos["Email"] = email.group()
-
-    return datos
-
+# ==============================
+# ROUTE PRINCIPAL
+# ==============================
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -109,25 +112,23 @@ def home():
 
             tipo = detectar_tipo_pdf(ruta)
 
+            mensaje += "<strong>Datos personales cargados:</strong><br>"
+            mensaje += f"<pre>{DATOS_USUARIO}</pre><br><br>"
+
             if tipo == "editable":
-                mensaje = "PDF editable detectado ✅"
+                mensaje += "PDF editable detectado ✅"
 
             elif tipo == "escaneado":
-                texto_ocr = ocr_google_vision(ruta)
-                datos = extraer_datos_basicos(texto_ocr)
-
-                mensaje = "PDF escaneado detectado 📄<br><br>"
-                mensaje += "<strong>Datos detectados:</strong><br>"
-                mensaje += f"<pre>{datos}</pre><br>"
+                mensaje += "PDF escaneado detectado 📄<br><br>"
+                texto_ocr = hacer_ocr_google(ruta)
                 mensaje += "<strong>Texto OCR:</strong><br>"
                 mensaje += f"<pre>{texto_ocr}</pre>"
 
             else:
-                mensaje = "Error procesando el archivo."
+                mensaje += "Error detectando tipo de PDF."
 
     return render_template_string(HTML, mensaje=mensaje)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
