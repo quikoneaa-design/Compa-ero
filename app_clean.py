@@ -2,16 +2,43 @@ from flask import Flask, request, render_template_string
 import os
 from datetime import datetime
 import fitz  # PyMuPDF
+import json
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# =========================
+# CARGA PERFIL PERSISTENTE
+# =========================
+
+try:
+    with open("perfil.json", "r", encoding="utf-8") as f:
+        PERFIL = json.load(f)
+except Exception as e:
+    PERFIL = None
+    print("Error cargando perfil.json:", e)
+
+# =========================
+# HTML BASE
+# =========================
+
 HTML = """
 <!doctype html>
-<title>Compañero MVP</title>
-<h1>VERSION NUEVA TEST - Compañero</h1>
+<title>Compañero</title>
+
+<h1>Compañero Activo</h1>
+
+{% if perfil %}
+<p><strong>Perfil cargado:</strong> {{ perfil["identidad"]["nombre_completo"] }}</p>
+{% else %}
+<p style="color:red;"><strong>Perfil NO cargado</strong></p>
+{% endif %}
+
+<hr>
+
+<h2>Subir solicitud PDF</h2>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="file" accept="application/pdf">
@@ -20,6 +47,10 @@ HTML = """
 
 <p>{{ mensaje }}</p>
 """
+
+# =========================
+# DETECCIÓN TIPO PDF
+# =========================
 
 def detectar_tipo_pdf(ruta_pdf):
     try:
@@ -39,6 +70,9 @@ def detectar_tipo_pdf(ruta_pdf):
     except Exception as e:
         return f"error: {str(e)}"
 
+# =========================
+# RUTA PRINCIPAL
+# =========================
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -60,4 +94,4 @@ def home():
 
             mensaje = f"Archivo guardado correctamente. Tipo detectado: {tipo}"
 
-    return render_template_string(HTML, mensaje=mensaje)
+    return render_template_string(HTML, mensaje=mensaje, perfil=PERFIL)
