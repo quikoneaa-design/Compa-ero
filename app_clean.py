@@ -90,20 +90,22 @@ def autorrellenar():
 
     dni = PERFIL["identidad"]["dni"]
 
-    # 🔍 Búsqueda más robusta
-    posibles_labels = ["DNI-NIF", "DNI NIF", "DNI", "NIF"]
+    # 🔎 Buscar bloque que contenga DNI o NIF
+    bloques = pagina.get_text("blocks")
 
     label_rect = None
 
-    for label in posibles_labels:
-        resultados = pagina.search_for(label)
-        if resultados:
-            label_rect = resultados[0]
+    for bloque in bloques:
+        x0, y0, x1, y1, texto, *_ = bloque
+        texto_mayus = texto.upper()
+
+        if "DNI" in texto_mayus or "NIF" in texto_mayus:
+            label_rect = fitz.Rect(x0, y0, x1, y1)
             break
 
     if not label_rect:
         doc.close()
-        return "No se encontró el campo DNI."
+        return "No se encontró el texto DNI/NIF en bloques."
 
     label_y = label_rect.y1
 
@@ -114,7 +116,7 @@ def autorrellenar():
         for item in dibujo["items"]:
             if item[0] == "re":
                 rect = fitz.Rect(item[1])
-                if rect.y0 > label_y and abs(rect.y0 - label_y) < 100:
+                if rect.y0 > label_y and abs(rect.y0 - label_y) < 120:
                     caja_objetivo = rect
                     break
         if caja_objetivo:
@@ -122,10 +124,11 @@ def autorrellenar():
 
     if not caja_objetivo:
         doc.close()
-        return "No se encontró la caja del DNI."
+        return "No se encontró la caja debajo del DNI."
 
     margen_x = 5
     x = caja_objetivo.x0 + margen_x
+
     altura_caja = caja_objetivo.y1 - caja_objetivo.y0
     y = caja_objetivo.y0 + altura_caja / 2 + 3
 
