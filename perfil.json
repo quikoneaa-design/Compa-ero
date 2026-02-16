@@ -1,0 +1,39 @@
+{
+  "identidad": {
+    "nombre": "Enrique",
+    "apellido1": "Afonso",
+    "apellido2": "Álvarez",
+    "nombre_completo": "Enrique Afonso Álvarez",
+    "dni": "50753101J",
+    "fecha_nacimiento": "23/02/1980",
+    "nacionalidad": "Española"
+  },
+  "contacto": {
+    "email": "quikon.eaa@gmail.com",
+    "telefono": "640358930"
+  },
+  "direccion": {
+    "via_tipo": "Calle",
+    "via_nombre": "Miquel Porcel",
+    "numero": "93",
+    "piso": "1",
+    "puerta": "B",
+    "codigo_postal": "07014",
+    "municipio": "Palma",
+    "provincia": "Illes Balears"
+  },
+  "actividad": {
+    "descripcion": "Venta de bisutería creativa realizada con conchas marinas naturales y piedras semipreciosas",
+    "producto": "Bisutería creativa realizada con conchas marinas naturales y piedras semipreciosas",
+    "parada_propia": true,
+    "manipulador_alimentos": false
+  },
+  "administrativo": {
+    "medio_notificacion": "Correo electrónico",
+    "ciudad_fecha": "Palma"
+  },
+  "firma": {
+    "imagen": "",
+    "nombre_firma": "Enrique Afonso Álvarez"
+  }
+}
