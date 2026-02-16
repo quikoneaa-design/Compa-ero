@@ -21,6 +21,12 @@ def cargar_perfil():
     with open(PERFIL_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def generar_fecha():
+    perfil = cargar_perfil()
+    ciudad = perfil["administrativo"]["ciudad_fecha"]
+    hoy = datetime.now().strftime("%d/%m/%Y")
+    return f"{ciudad}, {hoy}"
+
 # ==============================
 # HTML SIMPLE
 # ==============================
@@ -38,22 +44,37 @@ HTML = """
 """
 
 # ==============================
-# MOTOR A - PRUEBA COORDENADAS
+# OVERLAY PROFESIONAL
 # ==============================
 
-def rellenar_prueba(ruta_pdf, ruta_salida):
-    doc = fitz.open(ruta_pdf)
-    pagina = doc[0]
+def rellenar_overlay(ruta_pdf, ruta_salida):
+    perfil = cargar_perfil()
 
-    # TEXTO GRANDE Y VISIBLE EN EL CENTRO
-    pagina.insert_text(
-        (200, 300),
-        "PRUEBA COORDENADAS",
-        fontsize=25
-    )
+    doc_original = fitz.open(ruta_pdf)
+    doc_overlay = fitz.open()
 
-    doc.save(ruta_salida)
-    doc.close()
+    for page_num in range(len(doc_original)):
+        page_original = doc_original[page_num]
+
+        # Crear página overlay mismo tamaño
+        overlay_page = doc_overlay.new_page(
+            width=page_original.rect.width,
+            height=page_original.rect.height
+        )
+
+        if page_num == 0:
+            overlay_page.insert_text((200, 300), "PRUEBA COORDENADAS", fontsize=25)
+
+        # Fusionar overlay sobre original
+        page_original.show_pdf_page(
+            page_original.rect,
+            doc_overlay,
+            page_num
+        )
+
+    doc_original.save(ruta_salida)
+    doc_original.close()
+    doc_overlay.close()
 
 # ==============================
 # RUTA PRINCIPAL
@@ -62,35 +83,3 @@ def rellenar_prueba(ruta_pdf, ruta_salida):
 @app.route("/", methods=["GET", "POST"])
 def home():
     mensaje = ""
-
-    if request.method == "POST":
-        archivo = request.files.get("file")
-
-        if not archivo or archivo.filename == "":
-            mensaje = "No se seleccionó ningún archivo."
-        else:
-            ruta_original = os.path.join(UPLOAD_FOLDER, archivo.filename)
-            archivo.save(ruta_original)
-
-            base, ext = os.path.splitext(archivo.filename)
-            nombre_salida = f"{base}_PRUEBA.pdf"
-            ruta_salida = os.path.join(UPLOAD_FOLDER, nombre_salida)
-
-            rellenar_prueba(ruta_original, ruta_salida)
-
-            return send_file(
-                ruta_salida,
-                as_attachment=True,
-                download_name=nombre_salida,
-                mimetype="application/pdf"
-            )
-
-    return render_template_string(HTML, mensaje=mensaje)
-
-# ==============================
-# ARRANQUE RENDER
-# ==============================
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
