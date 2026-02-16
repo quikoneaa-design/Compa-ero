@@ -2,16 +2,13 @@ from flask import Flask, request, render_template_string, redirect, url_for
 import os
 from datetime import datetime
 import json
-import fitz  # PyMuPDF (lo dejamos preparado para fase 2)
+import fitz  # PyMuPDF
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# =========================
-# ESTADO TEMPORAL
-# =========================
 ULTIMO_ARCHIVO = None
 
 # =========================
@@ -21,7 +18,7 @@ with open("perfil.json", "r", encoding="utf-8") as f:
     PERFIL = json.load(f)
 
 # =========================
-# HTML BASE
+# HTML
 # =========================
 HTML = """
 <!doctype html>
@@ -81,7 +78,7 @@ def home():
     )
 
 # =========================
-# ENDPOINT AUTORRELLENAR
+# AUTORRELLENAR MOTOR
 # =========================
 @app.route("/autorrellenar", methods=["POST"])
 def autorrellenar():
@@ -90,5 +87,32 @@ def autorrellenar():
     if not ULTIMO_ARCHIVO:
         return redirect(url_for("home"))
 
-    # Aquí irá el motor en Fase 2
-    return f"Autorrellenado preparado para: {ULTIMO_ARCHIVO}"
+    doc = fitz.open(ULTIMO_ARCHIVO)
+    pagina = doc[0]  # Solo página 1 en esta primera versión
+
+    nombre = PERFIL["identidad"]["nombre_completo"]
+    dni = PERFIL["identidad"]["dni"]
+    actividad = PERFIL["actividad"]["descripcion"]
+
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    fecha_texto = f"Palma, {fecha_hoy}"
+
+    def insertar_derecha(texto_busqueda, texto_insertar, desplazamiento=10):
+        resultados = pagina.search_for(texto_busqueda)
+        for rect in resultados:
+            x = rect.x1 + desplazamiento
+            y = rect.y0
+            pagina.insert_text((x, y), texto_insertar, fontsize=10)
+
+    # Búsquedas adaptadas al modelo Andratx
+    insertar_derecha("DNI", dni)
+    insertar_derecha("Nom", nombre)
+    insertar_derecha("Descripció", actividad)
+    insertar_derecha("DATA", fecha_texto)
+    insertar_derecha("FECHA", fecha_texto)
+
+    nuevo_nombre = ULTIMO_ARCHIVO.replace(".pdf", "_AUTORRELLENADO.pdf")
+    doc.save(nuevo_nombre)
+    doc.close()
+
+    return f"PDF autorrellenado generado: {nuevo_nombre}"
