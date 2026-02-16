@@ -1,13 +1,33 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, send_file
 import os
 import fitz  # PyMuPDF
 import requests
 import base64
+import json
+from datetime import datetime
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+PERFIL_PATH = "perfil.json"
+
+# ==============================
+# CARGA PERFIL
+# ==============================
+
+def cargar_perfil():
+    if not os.path.exists(PERFIL_PATH):
+        return {}
+    with open(PERFIL_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def generar_fecha():
+    perfil = cargar_perfil()
+    ciudad = perfil["administrativo"]["ciudad_fecha"]
+    hoy = datetime.now().strftime("%d/%m/%Y")
+    return f"{ciudad}, {hoy}"
 
 # ==============================
 # HTML SIMPLE
@@ -26,36 +46,71 @@ HTML = """
 """
 
 # ==============================
-# DETECTAR TIPO PDF
+# DETECTAR FORMULARIO
 # ==============================
 
-def detectar_tipo_pdf(ruta_pdf):
+def tiene_formulario(ruta_pdf):
     try:
         doc = fitz.open(ruta_pdf)
-        texto_total = ""
-
-        for pagina in doc:
-            texto_total += pagina.get_text()
-
+        resultado = doc.is_form_pdf
         doc.close()
-
-        if texto_total.strip():
-            return "editable"
-        else:
-            return "escaneado"
-
+        return resultado
     except:
-        return "error"
-
+        return False
 
 # ==============================
-# OCR GOOGLE VISION (API KEY)
+# MOTOR B - FORMULARIOS
+# ==============================
+
+def rellenar_formulario(ruta_pdf, ruta_salida):
+    perfil = cargar_perfil()
+    doc = fitz.open(ruta_pdf)
+
+    for pagina in doc:
+        for widget in pagina.widgets():
+            nombre = widget.field_name.lower()
+
+            if "nombre" in nombre:
+                widget.field_value = perfil["identidad"]["nombre_completo"]
+
+            elif "dni" in nombre:
+                widget.field_value = perfil["identidad"]["dni"]
+
+            elif "email" in nombre:
+                widget.field_value = perfil["contacto"]["email"]
+
+            elif "telefono" in nombre:
+                widget.field_value = perfil["contacto"]["telefono"]
+
+    doc.save(ruta_salida)
+    doc.close()
+
+# ==============================
+# MOTOR A - COORDENADAS
+# ==============================
+
+def rellenar_por_coordenadas(ruta_pdf, ruta_salida):
+    perfil = cargar_perfil()
+    doc = fitz.open(ruta_pdf)
+
+    pagina = doc[0]
+
+    pagina.insert_text((50, 100), perfil["identidad"]["nombre_completo"])
+    pagina.insert_text((50, 120), perfil["identidad"]["dni"])
+    pagina.insert_text((50, 140), perfil["contacto"]["email"])
+    pagina.insert_text((50, 160), perfil["contacto"]["telefono"])
+    pagina.insert_text((50, 180), generar_fecha())
+
+    doc.save(ruta_salida)
+    doc.close()
+
+# ==============================
+# OCR GOOGLE VISION (MANTENIDO)
 # ==============================
 
 def hacer_ocr_google(ruta_pdf):
     try:
         api_key = os.environ.get("GOOGLE_API_KEY")
-
         if not api_key:
             return "⚠️ No hay API Key configurada."
 
@@ -76,12 +131,10 @@ def hacer_ocr_google(ruta_pdf):
         response = requests.post(url, json=data)
         resultado = response.json()
 
-        texto = resultado["responses"][0]["fullTextAnnotation"]["text"]
-        return texto
+        return resultado["responses"][0]["fullTextAnnotation"]["text"]
 
     except:
         return "Error realizando OCR."
-
 
 # ==============================
 # RUTA PRINCIPAL
@@ -97,28 +150,24 @@ def home():
         if not archivo or archivo.filename == "":
             mensaje = "No se seleccionó ningún archivo."
         else:
-            ruta = os.path.join(UPLOAD_FOLDER, archivo.filename)
-            archivo.save(ruta)
+            ruta_original = os.path.join(UPLOAD_FOLDER, archivo.filename)
+            archivo.save(ruta_original)
 
-            tipo = detectar_tipo_pdf(ruta)
+            nombre_salida = archivo.filename.replace(".pdf", "_RELLENADO.pdf")
+            ruta_salida = os.path.join(UPLOAD_FOLDER, nombre_salida)
 
-            if tipo == "editable":
-                mensaje += "✅ <strong>PDF editable detectado.</strong>"
-
-            elif tipo == "escaneado":
-                mensaje += "📄 <strong>PDF escaneado detectado.</strong><br><br>"
-                texto_ocr = hacer_ocr_google(ruta)
-                mensaje += "<strong>Texto OCR:</strong><br>"
-                mensaje += f"<pre>{texto_ocr}</pre>"
+            if tiene_formulario(ruta_original):
+                rellenar_formulario(ruta_original, ruta_salida)
+                return send_file(ruta_salida, as_attachment=True)
 
             else:
-                mensaje += "❌ Error detectando tipo de PDF."
+                rellenar_por_coordenadas(ruta_original, ruta_salida)
+                return send_file(ruta_salida, as_attachment=True)
 
     return render_template_string(HTML, mensaje=mensaje)
 
-
 # ==============================
-# ARRANQUE CORRECTO PARA RENDER
+# ARRANQUE RENDER
 # ==============================
 
 if __name__ == "__main__":
