@@ -1,11 +1,12 @@
 from flask import Flask, request, render_template_string
 import os
-import fitz  # PyMuPDF
-import pytesseract
-from PIL import Image
 from datetime import datetime
+import fitz  # PyMuPDF
+import requests
+import base64
 
 app = Flask(__name__)
+
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -20,6 +21,59 @@ HTML = """
 <p>{{ mensaje }}</p>
 """
 
+def detectar_tipo_pdf(ruta_pdf):
+    try:
+        doc = fitz.open(ruta_pdf)
+        texto_total = ""
+
+        for pagina in doc:
+            texto_total += pagina.get_text()
+
+        doc.close()
+
+        if texto_total.strip():
+            return "editable"
+        else:
+            return "escaneado"
+
+    except Exception:
+        return "error"
+
+def ocr_google_vision(ruta_pdf):
+    api_key = os.environ.get("GOOGLE_VISION_API_KEY")
+
+    if not api_key:
+        return "Error: API Key no configurada"
+
+    try:
+        doc = fitz.open(ruta_pdf)
+        pagina = doc.load_page(0)
+        pix = pagina.get_pixmap()
+        imagen_bytes = pix.tobytes("png")
+        doc.close()
+
+        contenido = base64.b64encode(imagen_bytes).decode("utf-8")
+
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
+
+        payload = {
+            "requests": [
+                {
+                    "image": {"content": contenido},
+                    "features": [{"type": "TEXT_DETECTION"}]
+                }
+            ]
+        }
+
+        response = requests.post(url, json=payload)
+        resultado = response.json()
+
+        texto = resultado["responses"][0]["fullTextAnnotation"]["text"]
+        return texto
+
+    except:
+        return "No se pudo realizar OCR"
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     mensaje = ""
@@ -29,47 +83,21 @@ def home():
 
         if not archivo or archivo.filename == "":
             mensaje = "No se seleccionó ningún archivo."
-
-        elif not archivo.filename.lower().endswith(".pdf"):
-            mensaje = "Solo se permiten archivos PDF."
-
         else:
-            fecha = datetime.now().strftime("%Y-%m-%d")
-            carpeta_fecha = os.path.join(UPLOAD_FOLDER, fecha)
-            os.makedirs(carpeta_fecha, exist_ok=True)
-
-            ruta = os.path.join(carpeta_fecha, archivo.filename)
+            ruta = os.path.join(UPLOAD_FOLDER, archivo.filename)
             archivo.save(ruta)
 
-            doc = fitz.open(ruta)
-            texto_total = ""
+            tipo = detectar_tipo_pdf(ruta)
 
-            for pagina in doc:
-                texto_total += pagina.get_text()
-
-            if texto_total.strip() == "":
-                # Intentar OCR
-                try:
-                    pagina = doc[0]
-                    pix = pagina.get_pixmap()
-                    imagen = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-                    texto_ocr = pytesseract.image_to_string(imagen)
-
-                    if texto_ocr.strip() == "":
-                        tipo = "PDF escaneado (OCR intentado pero sin texto detectado)"
-                    else:
-                        tipo = "PDF escaneado (OCR leído correctamente)"
-
-                except Exception:
-                    tipo = "PDF escaneado (OCR no disponible en servidor)"
-
+            if tipo == "editable":
+                mensaje = "PDF editable detectado ✅"
+            elif tipo == "escaneado":
+                texto_ocr = ocr_google_vision(ruta)
+                mensaje = f"PDF escaneado detectado 📄<br><br>Texto OCR:<br><pre>{texto_ocr}</pre>"
             else:
-                tipo = "PDF editable (contiene texto)"
-
-            mensaje = f"PDF guardado correctamente en {fecha}. Tipo detectado: {tipo}"
+                mensaje = "Error procesando el archivo."
 
     return render_template_string(HTML, mensaje=mensaje)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)
