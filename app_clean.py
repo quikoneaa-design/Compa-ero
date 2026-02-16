@@ -3,6 +3,7 @@ import os
 import fitz  # PyMuPDF
 import requests
 import base64
+import re
 
 app = Flask(__name__)
 
@@ -17,7 +18,7 @@ HTML = """
   <input type=file name=file>
   <input type=submit value=Subir>
 </form>
-<p>{{ mensaje }}</p>
+<p>{{ mensaje|safe }}</p>
 """
 
 def detectar_tipo_pdf(ruta_pdf):
@@ -75,6 +76,24 @@ def ocr_google_vision(ruta_pdf):
         return f"Error OCR: {str(e)}"
 
 
+def extraer_datos_basicos(texto):
+    datos = {}
+
+    dni = re.search(r'\b\d{8}[A-Za-z]\b', texto)
+    if dni:
+        datos["DNI"] = dni.group()
+
+    telefono = re.search(r'\b\d{9}\b', texto)
+    if telefono:
+        datos["Telefono"] = telefono.group()
+
+    email = re.search(r'\b[\w\.-]+@[\w\.-]+\.\w+\b', texto)
+    if email:
+        datos["Email"] = email.group()
+
+    return datos
+
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     mensaje = ""
@@ -92,9 +111,17 @@ def home():
 
             if tipo == "editable":
                 mensaje = "PDF editable detectado ✅"
+
             elif tipo == "escaneado":
                 texto_ocr = ocr_google_vision(ruta)
-                mensaje = f"PDF escaneado detectado 📄<br><br>Texto OCR:<br><pre>{texto_ocr}</pre>"
+                datos = extraer_datos_basicos(texto_ocr)
+
+                mensaje = "PDF escaneado detectado 📄<br><br>"
+                mensaje += "<strong>Datos detectados:</strong><br>"
+                mensaje += f"<pre>{datos}</pre><br>"
+                mensaje += "<strong>Texto OCR:</strong><br>"
+                mensaje += f"<pre>{texto_ocr}</pre>"
+
             else:
                 mensaje = "Error procesando el archivo."
 
