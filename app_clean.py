@@ -1,35 +1,12 @@
-from flask import Flask, request, render_template_string, send_file
+from flask import Flask, request, render_template_string
 import os
-import fitz
-import json
 from datetime import datetime
+import fitz  # PyMuPDF
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-PERFIL_PATH = "perfil.json"
-
-# ==============================
-# PERFIL
-# ==============================
-
-def cargar_perfil():
-    if not os.path.exists(PERFIL_PATH):
-        return {}
-    with open(PERFIL_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def generar_fecha():
-    perfil = cargar_perfil()
-    ciudad = perfil.get("administrativo", {}).get("ciudad_fecha", "Palma")
-    hoy = datetime.now().strftime("%d/%m/%Y")
-    return f"{ciudad}, {hoy}"
-
-# ==============================
-# HTML
-# ==============================
 
 HTML = """
 <!doctype html>
@@ -39,67 +16,57 @@ HTML = """
   <input type=file name=file>
   <input type=submit value=Subir>
 </form>
-<hr>
 <p>{{ mensaje }}</p>
 """
 
-# ==============================
-# OVERLAY PROFESIONAL
-# ==============================
+def detectar_tipo_pdf(ruta_pdf):
+    try:
+        doc = fitz.open(ruta_pdf)
+        texto_total = ""
 
-def rellenar_overlay(ruta_pdf, ruta_salida):
-    doc_original = fitz.open(ruta_pdf)
+        for pagina in doc:
+            texto_total += pagina.get_text()
 
-    for page in doc_original:
-        rect = page.rect
+        doc.close()
 
-        # Insertamos texto directamente encima (sin doc_overlay separado)
-        page.insert_text(
-            (200, 300),
-            "PRUEBA COORDENADAS",
-            fontsize=25,
-            color=(1, 0, 0)
-        )
+        if texto_total.strip():
+            return "editable"
+        else:
+            return "escaneado"
 
-    doc_original.save(ruta_salida)
-    doc_original.close()
+    except Exception as e:
+        return "error"
 
-# ==============================
-# RUTA PRINCIPAL
-# ==============================
 
 @app.route("/", methods=["GET", "POST"])
 def home():
+    mensaje = ""
 
     if request.method == "POST":
         archivo = request.files.get("file")
 
         if not archivo or archivo.filename == "":
-            return render_template_string(HTML, mensaje="No se seleccionó archivo.")
+            mensaje = "No se seleccionó ningún archivo."
+            return render_template_string(HTML, mensaje=mensaje)
 
-        ruta_original = os.path.join(UPLOAD_FOLDER, archivo.filename)
-        archivo.save(ruta_original)
+        ruta_guardado = os.path.join(UPLOAD_FOLDER, archivo.filename)
+        archivo.save(ruta_guardado)
 
-        base, ext = os.path.splitext(archivo.filename)
-        nombre_salida = f"{base}_OVERLAY.pdf"
-        ruta_salida = os.path.join(UPLOAD_FOLDER, nombre_salida)
+        tipo = detectar_tipo_pdf(ruta_guardado)
 
-        rellenar_overlay(ruta_original, ruta_salida)
+        if tipo == "editable":
+            mensaje = "El PDF es editable."
+        elif tipo == "escaneado":
+            mensaje = "El PDF parece escaneado."
+        else:
+            mensaje = "Error al analizar el PDF."
 
-        return send_file(
-            ruta_salida,
-            as_attachment=True,
-            download_name=nombre_salida,
-            mimetype="application/pdf"
-        )
+        return render_template_string(HTML, mensaje=mensaje)
 
-    # IMPORTANTE: siempre devolver algo en GET
-    return render_template_string(HTML, mensaje="")
+    return render_template_string(HTML, mensaje=mensaje)
 
-# ==============================
-# ARRANQUE RENDER
-# ==============================
 
+# 👇 MUY IMPORTANTE PARA RAILWAY
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
