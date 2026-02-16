@@ -1,9 +1,8 @@
 from flask import Flask, request, render_template_string
 import os
 import fitz  # PyMuPDF
-import base64
 import requests
-from datetime import datetime
+import base64
 
 app = Flask(__name__)
 
@@ -11,21 +10,23 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ==============================
-# BASE DE DATOS PERSONAL FIJA
+# HTML SIMPLE
 # ==============================
 
-DATOS_USUARIO = {
-    "nombre": "Enrique Afonso Álvarez",
-    "dni": "50753101J",
-    "actividad": "Venta de joyería y bisutería creativa",
-    "producto": "Joyería/bisutería realizada con conchas marinas naturales y piedras semipreciosas",
-    "parada_propia": "Sí",
-    "manipulador_alimentos": "No",
-    "lugar": "Palma"
-}
+HTML = """
+<!doctype html>
+<title>Compañero</title>
+<h1>Subir solicitud PDF</h1>
+<form method=post enctype=multipart/form-data>
+  <input type=file name=file>
+  <input type=submit value=Subir>
+</form>
+<hr>
+<p>{{ mensaje|safe }}</p>
+"""
 
 # ==============================
-# DETECTAR TIPO DE PDF
+# DETECTAR TIPO PDF
 # ==============================
 
 def detectar_tipo_pdf(ruta_pdf):
@@ -43,58 +44,47 @@ def detectar_tipo_pdf(ruta_pdf):
         else:
             return "escaneado"
 
-    except Exception:
+    except:
         return "error"
 
+
 # ==============================
-# OCR GOOGLE VISION
+# OCR GOOGLE VISION (API KEY)
 # ==============================
 
 def hacer_ocr_google(ruta_pdf):
-    api_key = os.getenv("GOOGLE_VISION_API_KEY")
-
-    if not api_key:
-        return "Error: API Key no configurada"
-
-    with open(ruta_pdf, "rb") as f:
-        contenido = base64.b64encode(f.read()).decode()
-
-    url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-
-    payload = {
-        "requests": [
-            {
-                "image": {"content": contenido},
-                "features": [{"type": "TEXT_DETECTION"}]
-            }
-        ]
-    }
-
-    response = requests.post(url, json=payload)
-    resultado = response.json()
-
     try:
-        return resultado["responses"][0]["fullTextAnnotation"]["text"]
+        api_key = os.environ.get("GOOGLE_API_KEY")
+
+        if not api_key:
+            return "⚠️ No hay API Key configurada."
+
+        with open(ruta_pdf, "rb") as f:
+            contenido = base64.b64encode(f.read()).decode()
+
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
+
+        data = {
+            "requests": [
+                {
+                    "image": {"content": contenido},
+                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+                }
+            ]
+        }
+
+        response = requests.post(url, json=data)
+        resultado = response.json()
+
+        texto = resultado["responses"][0]["fullTextAnnotation"]["text"]
+        return texto
+
     except:
-        return "No se detectó texto."
+        return "Error realizando OCR."
+
 
 # ==============================
-# HTML
-# ==============================
-
-HTML = """
-<!doctype html>
-<title>Compañero</title>
-<h1>Subir solicitud PDF</h1>
-<form method=post enctype=multipart/form-data>
-  <input type=file name=file>
-  <input type=submit value=Subir>
-</form>
-<p>{{ mensaje|safe }}</p>
-"""
-
-# ==============================
-# ROUTE PRINCIPAL
+# RUTA PRINCIPAL
 # ==============================
 
 @app.route("/", methods=["GET", "POST"])
@@ -112,23 +102,25 @@ def home():
 
             tipo = detectar_tipo_pdf(ruta)
 
-            mensaje += "<strong>Datos personales cargados:</strong><br>"
-            mensaje += f"<pre>{DATOS_USUARIO}</pre><br><br>"
-
             if tipo == "editable":
-                mensaje += "PDF editable detectado ✅"
+                mensaje += "✅ <strong>PDF editable detectado.</strong>"
 
             elif tipo == "escaneado":
-                mensaje += "PDF escaneado detectado 📄<br><br>"
+                mensaje += "📄 <strong>PDF escaneado detectado.</strong><br><br>"
                 texto_ocr = hacer_ocr_google(ruta)
                 mensaje += "<strong>Texto OCR:</strong><br>"
                 mensaje += f"<pre>{texto_ocr}</pre>"
 
             else:
-                mensaje += "Error detectando tipo de PDF."
+                mensaje += "❌ Error detectando tipo de PDF."
 
     return render_template_string(HTML, mensaje=mensaje)
 
 
+# ==============================
+# ARRANQUE CORRECTO PARA RENDER
+# ==============================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
