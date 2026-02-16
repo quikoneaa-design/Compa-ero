@@ -1,6 +1,5 @@
 from flask import Flask, request, render_template_string
 import os
-from datetime import datetime
 import fitz  # PyMuPDF
 import requests
 import base64
@@ -39,6 +38,7 @@ def detectar_tipo_pdf(ruta_pdf):
     except Exception:
         return "error"
 
+
 def ocr_google_vision(ruta_pdf):
     api_key = os.environ.get("GOOGLE_VISION_API_KEY")
 
@@ -71,8 +71,9 @@ def ocr_google_vision(ruta_pdf):
         texto = resultado["responses"][0]["fullTextAnnotation"]["text"]
         return texto
 
-    except:
-        return "No se pudo realizar OCR"
+    except Exception as e:
+        return f"Error OCR: {str(e)}"
+
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -99,5 +100,7 @@ def home():
 
     return render_template_string(HTML, mensaje=mensaje)
 
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
