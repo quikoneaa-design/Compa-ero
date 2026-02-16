@@ -1,6 +1,5 @@
 from flask import Flask, request, render_template_string
 import os
-from datetime import datetime
 import fitz  # PyMuPDF
 
 app = Flask(__name__)
@@ -34,7 +33,7 @@ def detectar_tipo_pdf(ruta_pdf):
         else:
             return "escaneado"
 
-    except Exception as e:
+    except Exception:
         return "error"
 
 
@@ -64,9 +63,3 @@ def home():
         return render_template_string(HTML, mensaje=mensaje)
 
     return render_template_string(HTML, mensaje=mensaje)
-
-
-# 👇 MUY IMPORTANTE PARA RAILWAY
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
