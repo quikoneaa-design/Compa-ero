@@ -1,8 +1,8 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect, url_for
 import os
 from datetime import datetime
-import fitz  # PyMuPDF
 import json
+import fitz  # PyMuPDF (lo dejamos preparado para fase 2)
 
 app = Flask(__name__)
 
@@ -10,31 +10,25 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # =========================
-# CARGA PERFIL PERSISTENTE
+# ESTADO TEMPORAL
 # =========================
+ULTIMO_ARCHIVO = None
 
-try:
-    with open("perfil.json", "r", encoding="utf-8") as f:
-        PERFIL = json.load(f)
-except Exception as e:
-    PERFIL = None
-    print("Error cargando perfil.json:", e)
+# =========================
+# CARGA PERFIL
+# =========================
+with open("perfil.json", "r", encoding="utf-8") as f:
+    PERFIL = json.load(f)
 
 # =========================
 # HTML BASE
 # =========================
-
 HTML = """
 <!doctype html>
 <title>Compañero</title>
 
 <h1>Compañero Activo</h1>
-
-{% if perfil %}
-<p><strong>Perfil cargado:</strong> {{ perfil["identidad"]["nombre_completo"] }}</p>
-{% else %}
-<p style="color:red;"><strong>Perfil NO cargado</strong></p>
-{% endif %}
+<p><strong>Perfil:</strong> {{ perfil["identidad"]["nombre_completo"] }}</p>
 
 <hr>
 
@@ -45,53 +39,56 @@ HTML = """
   <input type="submit" value="Subir PDF">
 </form>
 
-<p>{{ mensaje }}</p>
+{% if archivo %}
+  <hr>
+  <p><strong>Estado:</strong> BORRADOR</p>
+  <p>{{ archivo }}</p>
+
+  <form action="{{ url_for('autorrellenar') }}" method="post">
+    <button type="submit">Autorrellenar con perfil</button>
+  </form>
+{% endif %}
+
+<p style="color:green;">{{ mensaje }}</p>
 """
-
-# =========================
-# DETECCIÓN TIPO PDF
-# =========================
-
-def detectar_tipo_pdf(ruta_pdf):
-    try:
-        doc = fitz.open(ruta_pdf)
-        texto_total = ""
-
-        for pagina in doc:
-            texto_total += pagina.get_text()
-
-        doc.close()
-
-        if texto_total.strip():
-            return "editable"
-        else:
-            return "escaneado"
-
-    except Exception as e:
-        return f"error: {str(e)}"
 
 # =========================
 # RUTA PRINCIPAL
 # =========================
-
 @app.route("/", methods=["GET", "POST"])
 def home():
+    global ULTIMO_ARCHIVO
     mensaje = ""
 
     if request.method == "POST":
         archivo = request.files.get("file")
 
-        if not archivo or archivo.filename == "":
-            mensaje = "No se seleccionó ningún archivo."
-        else:
+        if archivo and archivo.filename:
             fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-            nombre_archivo = f"{fecha}_{archivo.filename}"
-            ruta_guardado = os.path.join(UPLOAD_FOLDER, nombre_archivo)
+            nombre = f"{fecha}_{archivo.filename}"
+            ruta = os.path.join(UPLOAD_FOLDER, nombre)
 
-            archivo.save(ruta_guardado)
+            archivo.save(ruta)
+            ULTIMO_ARCHIVO = ruta
 
-            tipo = detectar_tipo_pdf(ruta_guardado)
+            mensaje = "Archivo subido correctamente."
 
-            mensaje = f"Archivo guardado correctamente. Tipo detectado: {tipo}"
+    return render_template_string(
+        HTML,
+        perfil=PERFIL,
+        archivo=ULTIMO_ARCHIVO,
+        mensaje=mensaje
+    )
 
-    return render_template_string(HTML, mensaje=mensaje, perfil=PERFIL)
+# =========================
+# ENDPOINT AUTORRELLENAR
+# =========================
+@app.route("/autorrellenar", methods=["POST"])
+def autorrellenar():
+    global ULTIMO_ARCHIVO
+
+    if not ULTIMO_ARCHIVO:
+        return redirect(url_for("home"))
+
+    # Aquí irá el motor en Fase 2
+    return f"Autorrellenado preparado para: {ULTIMO_ARCHIVO}"
