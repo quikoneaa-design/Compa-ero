@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template_string
 import os
+from datetime import datetime
 import fitz  # PyMuPDF
 
 app = Flask(__name__)
@@ -9,12 +10,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 HTML = """
 <!doctype html>
-<title>Compañero</title>
-<h1>Subir solicitud PDF</h1>
-<form method=post enctype=multipart/form-data>
-  <input type=file name=file>
-  <input type=submit value=Subir>
+<title>Compañero MVP</title>
+<h1>VERSION NUEVA TEST - Compañero</h1>
+
+<form method="post" enctype="multipart/form-data">
+  <input type="file" name="file" accept="application/pdf">
+  <input type="submit" value="Subir PDF">
 </form>
+
 <p>{{ mensaje }}</p>
 """
 
@@ -33,8 +36,8 @@ def detectar_tipo_pdf(ruta_pdf):
         else:
             return "escaneado"
 
-    except Exception:
-        return "error"
+    except Exception as e:
+        return f"error: {str(e)}"
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -46,20 +49,15 @@ def home():
 
         if not archivo or archivo.filename == "":
             mensaje = "No se seleccionó ningún archivo."
-            return render_template_string(HTML, mensaje=mensaje)
-
-        ruta_guardado = os.path.join(UPLOAD_FOLDER, archivo.filename)
-        archivo.save(ruta_guardado)
-
-        tipo = detectar_tipo_pdf(ruta_guardado)
-
-        if tipo == "editable":
-            mensaje = "El PDF es editable."
-        elif tipo == "escaneado":
-            mensaje = "El PDF parece escaneado."
         else:
-            mensaje = "Error al analizar el PDF."
+            fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo = f"{fecha}_{archivo.filename}"
+            ruta_guardado = os.path.join(UPLOAD_FOLDER, nombre_archivo)
 
-        return render_template_string(HTML, mensaje=mensaje)
+            archivo.save(ruta_guardado)
+
+            tipo = detectar_tipo_pdf(ruta_guardado)
+
+            mensaje = f"Archivo guardado correctamente. Tipo detectado: {tipo}"
 
     return render_template_string(HTML, mensaje=mensaje)
