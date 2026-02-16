@@ -12,15 +12,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 ULTIMO_AUTORRELLENADO = None
 
-# =========================
-# CARGA PERFIL
-# =========================
 with open("perfil.json", "r", encoding="utf-8") as f:
     PERFIL = json.load(f)
 
-# =========================
-# HTML
-# =========================
 HTML = """
 <!doctype html>
 <title>Compañero</title>
@@ -58,9 +52,6 @@ HTML = """
 <p style="color:green;">{{ mensaje }}</p>
 """
 
-# =========================
-# RUTA PRINCIPAL
-# =========================
 @app.route("/", methods=["GET", "POST"])
 def home():
     global ULTIMO_ARCHIVO
@@ -87,9 +78,6 @@ def home():
         mensaje=mensaje
     )
 
-# =========================
-# AUTORRELLENAR SOLO DNI (VERSIÓN SERIA)
-# =========================
 @app.route("/autorrellenar", methods=["POST"])
 def autorrellenar():
     global ULTIMO_ARCHIVO, ULTIMO_AUTORRELLENADO
@@ -102,19 +90,23 @@ def autorrellenar():
 
     dni = PERFIL["identidad"]["dni"]
 
-    # 1️⃣ Buscar label DNI
-    resultados = pagina.search_for("DNI-NIF")
-    if not resultados:
-        resultados = pagina.search_for("DNI")
+    # 🔍 Búsqueda más robusta
+    posibles_labels = ["DNI-NIF", "DNI NIF", "DNI", "NIF"]
 
-    if not resultados:
+    label_rect = None
+
+    for label in posibles_labels:
+        resultados = pagina.search_for(label)
+        if resultados:
+            label_rect = resultados[0]
+            break
+
+    if not label_rect:
         doc.close()
         return "No se encontró el campo DNI."
 
-    label_rect = resultados[0]
     label_y = label_rect.y1
 
-    # 2️⃣ Detectar rectángulos dibujados
     dibujos = pagina.get_drawings()
     caja_objetivo = None
 
@@ -122,9 +114,7 @@ def autorrellenar():
         for item in dibujo["items"]:
             if item[0] == "re":
                 rect = fitz.Rect(item[1])
-
-                # Caja justo debajo del label
-                if rect.y0 > label_y and abs(rect.y0 - label_y) < 80:
+                if rect.y0 > label_y and abs(rect.y0 - label_y) < 100:
                     caja_objetivo = rect
                     break
         if caja_objetivo:
@@ -134,18 +124,12 @@ def autorrellenar():
         doc.close()
         return "No se encontró la caja del DNI."
 
-    # 3️⃣ Insertar texto dentro de la caja
     margen_x = 5
     x = caja_objetivo.x0 + margen_x
-
     altura_caja = caja_objetivo.y1 - caja_objetivo.y0
     y = caja_objetivo.y0 + altura_caja / 2 + 3
 
-    pagina.insert_text(
-        (x, y),
-        dni,
-        fontsize=10
-    )
+    pagina.insert_text((x, y), dni, fontsize=10)
 
     nuevo_nombre = os.path.basename(ULTIMO_ARCHIVO).replace(".pdf", "_AUTORRELLENADO.pdf")
     nueva_ruta = os.path.join(UPLOAD_FOLDER, nuevo_nombre)
@@ -163,9 +147,6 @@ def autorrellenar():
         mensaje="DNI insertado correctamente."
     )
 
-# =========================
-# DESCARGA
-# =========================
 @app.route("/descargar/<nombre>")
 def descargar(nombre):
     return send_from_directory(UPLOAD_FOLDER, nombre, as_attachment=True)
