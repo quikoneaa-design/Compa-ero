@@ -1,7 +1,6 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, send_file
 import os
-from datetime import datetime
-import fitz  # PyMuPDF
+import fitz
 import json
 
 app = Flask(__name__)
@@ -9,37 +8,46 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+ULTIMO_ARCHIVO = None
+
 # ===============================
-# PERFIL USUARIO
+# PERFIL
 # ===============================
 with open("perfil.json", "r", encoding="utf-8") as f:
     PERFIL = json.load(f)
 
 # ===============================
-# HTML SIMPLE
+# HTML
 # ===============================
 HTML = """
 <!doctype html>
 <title>Compañero</title>
+
 <h1>Subir solicitud PDF</h1>
-<form method=post enctype=multipart/form-data>
-  <input type=file name=file accept="application/pdf">
-  <input type=submit value=Subir>
+
+<form method="post" enctype="multipart/form-data">
+  <input type="file" name="file" accept="application/pdf">
+  <input type="submit" value="Subir">
 </form>
+
 <p>{{ mensaje }}</p>
+
+{% if descargar %}
+<hr>
+<a href="/descargar">
+<button style="font-size:18px;padding:10px 20px;">
+⬇️ Descargar PDF rellenado
+</button>
+</a>
+{% endif %}
 """
 
 # ===============================
-# AJUSTE DNI (CALIBRADO)
+# RECTÁNGULO DNI
 # ===============================
-
-# 🔴 RECTÁNGULO BASE (EL TUYO ORIGINAL — AJUSTA SI CAMBIA)
 DNI_RECT_BASE = fitz.Rect(150, 250, 300, 280)
-
-# 👉 DESPLAZAMIENTO A LA DERECHA (LO QUE HEMOS DECIDIDO)
 DX_DNI = 68.0
 
-# ✅ RECTÁNGULO FINAL AJUSTADO
 DNI_RECT = fitz.Rect(
     DNI_RECT_BASE.x0 + DX_DNI,
     DNI_RECT_BASE.y0,
@@ -48,17 +56,14 @@ DNI_RECT = fitz.Rect(
 )
 
 # ===============================
-# FUNCIÓN CENTRADO REAL
+# CENTRADO REAL
 # ===============================
 def insertar_texto_centrado(page, rect, texto, fontsize=11):
     fontname = "helv"
 
-    # calcular ancho del texto
     text_width = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
-
     x = rect.x0 + (rect.width - text_width) / 2
 
-    # centrado vertical real
     font = fitz.Font(fontname)
     asc = font.ascender
     desc = font.descender
@@ -75,7 +80,7 @@ def insertar_texto_centrado(page, rect, texto, fontsize=11):
     )
 
 # ===============================
-# DETECTAR TIPO PDF
+# DETECTAR PDF
 # ===============================
 def detectar_tipo_pdf(ruta_pdf):
     try:
@@ -96,18 +101,21 @@ def detectar_tipo_pdf(ruta_pdf):
         return "error"
 
 # ===============================
-# RUTA PRINCIPAL
+# HOME
 # ===============================
 @app.route("/", methods=["GET", "POST"])
 def home():
+    global ULTIMO_ARCHIVO
+
     mensaje = ""
+    mostrar_descarga = False
 
     if request.method == "POST":
         archivo = request.files.get("file")
 
         if not archivo or archivo.filename == "":
             mensaje = "No se seleccionó ningún archivo."
-            return render_template_string(HTML, mensaje=mensaje)
+            return render_template_string(HTML, mensaje=mensaje, descargar=False)
 
         ruta_pdf = os.path.join(UPLOAD_FOLDER, archivo.filename)
         archivo.save(ruta_pdf)
@@ -118,9 +126,6 @@ def home():
             doc = fitz.open(ruta_pdf)
             page = doc[0]
 
-            # ===============================
-            # INSERTAR DNI (YA DESPLAZADO)
-            # ===============================
             insertar_texto_centrado(
                 page,
                 DNI_RECT,
@@ -131,12 +136,30 @@ def home():
             doc.save(salida)
             doc.close()
 
+            ULTIMO_ARCHIVO = salida
             mensaje = f"PDF procesado correctamente ({tipo})."
+            mostrar_descarga = True
 
         except Exception as e:
             mensaje = f"Error procesando PDF: {e}"
 
-    return render_template_string(HTML, mensaje=mensaje)
+    return render_template_string(
+        HTML,
+        mensaje=mensaje,
+        descargar=mostrar_descarga
+    )
+
+# ===============================
+# DESCARGA
+# ===============================
+@app.route("/descargar")
+def descargar():
+    global ULTIMO_ARCHIVO
+
+    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
+        return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+
+    return "No hay archivo para descargar."
 
 # ===============================
 # RUN
