@@ -16,9 +16,6 @@ ULTIMO_ARCHIVO = None
 with open("perfil.json", "r", encoding="utf-8") as f:
     PERFIL = json.load(f)
 
-# ===============================
-# HTML
-# ===============================
 HTML = """
 <!doctype html>
 <title>Compañero</title>
@@ -43,21 +40,26 @@ HTML = """
 """
 
 # ===============================
-# RELLENAR DNI (POR NOMBRE REAL)
+# 🎯 RELLENAR DNI (campo nº2)
 # ===============================
 def rellenar_dni(doc, dni_valor):
+    contador = 1
+
     for pagina in doc:
         widgets = pagina.widgets()
         if not widgets:
             continue
 
         for w in widgets:
-            nombre = str(w.field_name)
-
-            # 🎯 DNI del solicitante
-            if nombre == "Cuadro de texto 1":
-                w.field_value = dni_valor
-                w.update()
+            try:
+                if w.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
+                    if contador == 2:  # ⭐ EL BUENO
+                        w.field_value = dni_valor
+                        w.update()
+                        return
+                    contador += 1
+            except:
+                pass
 
 # ===============================
 # HOME
@@ -82,17 +84,14 @@ def home():
         try:
             doc = fitz.open(ruta_pdf)
 
-            rellenar_dni(
-                doc,
-                PERFIL.get("dni", "")
-            )
+            rellenar_dni(doc, PERFIL.get("dni", ""))
 
             salida = ruta_pdf.replace(".pdf", "_rellenado.pdf")
             doc.save(salida)
             doc.close()
 
             ULTIMO_ARCHIVO = salida
-            mensaje = "PDF rellenado correctamente."
+            mensaje = "DNI rellenado correctamente."
             mostrar_descarga = True
 
         except Exception as e:
