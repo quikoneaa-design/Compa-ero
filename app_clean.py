@@ -15,8 +15,8 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # CALIBRACIÓN (AJUSTA AQUÍ)
 # =========================
 
-# Rectángulo del campo DNI
-DNI_RECT = fitz.Rect(90, 215, 250, 235)
+# 🔧 Rectángulo del campo DNI (AJUSTADO MÁS ABAJO)
+DNI_RECT = fitz.Rect(90, 255, 250, 275)
 
 # Fuente y tamaño
 FONT_NAME = "helv"
