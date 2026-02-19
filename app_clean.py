@@ -40,11 +40,16 @@ HTML = """
 """
 
 # ===============================
-# 🎯 RELLENAR DNI (campo nº2)
+# 🎯 RELLENAR DNI (HÍBRIDO)
 # ===============================
 def rellenar_dni(doc, dni_valor):
-    contador = 1
+    """
+    1) Intenta rellenar widget (formularios reales)
+    2) Si no hay widget → escribe texto en coordenadas (fallback)
+    """
 
+    # ===== INTENTO 1: WIDGET =====
+    contador = 1
     for pagina in doc:
         widgets = pagina.widgets()
         if not widgets:
@@ -53,13 +58,38 @@ def rellenar_dni(doc, dni_valor):
         for w in widgets:
             try:
                 if w.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
-                    if contador == 2:  # ⭐ EL BUENO
+                    if contador == 2:
                         w.field_value = dni_valor
                         w.update()
-                        return
+                        print("✅ DNI rellenado en widget")
+                        return True
                     contador += 1
             except:
                 pass
+
+    # ===== INTENTO 2: FALLBACK COORDENADAS =====
+    print("⚠️ No hay widgets — usando modo coordenadas")
+
+    try:
+        pagina = doc[0]
+
+        # 🔴 AJUSTABLE — caja aproximada del DNI en el PDF de prueba
+        rect = fitz.Rect(160, 300, 400, 330)
+
+        pagina.insert_textbox(
+            rect,
+            dni_valor,
+            fontsize=12,
+            align=1  # centrado horizontal
+        )
+
+        print("✅ DNI escrito por coordenadas")
+        return True
+
+    except Exception as e:
+        print("❌ Error en fallback:", e)
+        return False
+
 
 # ===============================
 # HOME
