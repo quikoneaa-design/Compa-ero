@@ -1,206 +1,145 @@
-from flask import Flask, request, render_template_string, send_file, url_for
+from flask import Flask, request, render_template_string
 import os
 from datetime import datetime
-import uuid
 import fitz  # PyMuPDF
+import json
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
-OUTPUT_FOLDER = "output"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# =========================
-# CALIBRACIÓN (AJUSTA AQUÍ)
-# =========================
-# ✅ DNI: la CASILLA está DEBAJO del título "DNI-NIF" (columna izquierda)
-# Este rectángulo apunta a la caja debajo del rótulo, no al campo de correo de la derecha.
-DNI_RECT = fitz.Rect(35, 272, 125, 292)
+# ===============================
+# PERFIL USUARIO
+# ===============================
+with open("perfil.json", "r", encoding="utf-8") as f:
+    PERFIL = json.load(f)
 
-# Fuente y tamaño
-FONT_NAME = "helv"
-FONT_SIZE = 10
-
-# Microajustes (neutros)
-DX_OPTICO = 0.0
-DY_OPTICO = 0.0
-
-
-HTML_HOME = """
+# ===============================
+# HTML SIMPLE
+# ===============================
+HTML = """
 <!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Compañero</title>
-</head>
-<body>
-  <h1>Subir solicitud PDF</h1>
-
-  <form method="post" enctype="multipart/form-data">
-    <p>
-      <b>PDF:</b><br>
-      <input type="file" name="file" accept="application/pdf" required>
-    </p>
-
-    <p>
-      <b>DNI (prueba de centrado):</b><br>
-      <input type="text" name="dni" value="{{ dni_default }}" maxlength="12">
-    </p>
-
-    <p>
-      <button type="submit">Generar PDF (DNI centrado)</button>
-    </p>
-  </form>
-
-  {% if mensaje %}
-    <p>{{ mensaje }}</p>
-  {% endif %}
-</body>
-</html>
+<title>Compañero</title>
+<h1>Subir solicitud PDF</h1>
+<form method=post enctype=multipart/form-data>
+  <input type=file name=file accept="application/pdf">
+  <input type=submit value=Subir>
+</form>
+<p>{{ mensaje }}</p>
 """
 
+# ===============================
+# AJUSTE DNI (CALIBRADO)
+# ===============================
 
-HTML_RESULT = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Compañero - Resultado</title>
-</head>
-<body>
-  <h1>PDF generado</h1>
+# 🔴 RECTÁNGULO BASE (EL TUYO ORIGINAL — AJUSTA SI CAMBIA)
+DNI_RECT_BASE = fitz.Rect(150, 250, 300, 280)
 
-  <p><b>Archivo:</b> {{ filename }}</p>
+# 👉 DESPLAZAMIENTO A LA DERECHA (LO QUE HEMOS DECIDIDO)
+DX_DNI = 68.0
 
-  <p>
-    <a href="{{ download_url }}">Descargar</a>
-    <a href="{{ print_url }}" target="_blank">Imprimir</a>
-  </p>
+# ✅ RECTÁNGULO FINAL AJUSTADO
+DNI_RECT = fitz.Rect(
+    DNI_RECT_BASE.x0 + DX_DNI,
+    DNI_RECT_BASE.y0,
+    DNI_RECT_BASE.x1 + DX_DNI,
+    DNI_RECT_BASE.y1
+)
 
-  <p><a href="{{ home_url }}">← Volver</a></p>
-</body>
-</html>
-"""
+# ===============================
+# FUNCIÓN CENTRADO REAL
+# ===============================
+def insertar_texto_centrado(page, rect, texto, fontsize=11):
+    fontname = "helv"
 
+    # calcular ancho del texto
+    text_width = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
 
-def detectar_tipo_pdf(ruta_pdf: str) -> str:
+    x = rect.x0 + (rect.width - text_width) / 2
+
+    # centrado vertical real
+    font = fitz.Font(fontname)
+    asc = font.ascender
+    desc = font.descender
+    text_height = (asc - desc) * fontsize
+
+    y = rect.y0 + (rect.height + text_height) / 2 - desc * fontsize
+
+    page.insert_text(
+        (x, y),
+        texto,
+        fontsize=fontsize,
+        fontname=fontname,
+        fill=(0, 0, 0)
+    )
+
+# ===============================
+# DETECTAR TIPO PDF
+# ===============================
+def detectar_tipo_pdf(ruta_pdf):
     try:
         doc = fitz.open(ruta_pdf)
-        texto_total = []
-        for p in doc:
-            t = p.get_text().strip()
-            if t:
-                texto_total.append(t)
-                if len("".join(texto_total)) > 50:
-                    break
+        texto_total = ""
+
+        for pagina in doc:
+            texto_total += pagina.get_text()
+
         doc.close()
-        return "editable" if "".join(texto_total).strip() else "escaneado"
+
+        if texto_total.strip():
+            return "editable"
+        else:
+            return "escaneado"
+
     except Exception:
         return "error"
 
-
-def baseline_y_centrado_vertical(rect: fitz.Rect, fontsize: float) -> float:
-    # Baseline óptica estable (para formularios)
-    return rect.y0 + rect.height / 2 + fontsize * 0.33
-
-
-def posicion_centrada(
-    rect: fitz.Rect,
-    texto: str,
-    fontname: str,
-    fontsize: float,
-    dx: float = 0.0,
-    dy: float = 0.0
-):
-    w = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
-    x = rect.x0 + (rect.width - w) / 2.0
-    y = baseline_y_centrado_vertical(rect, fontsize)
-    x += dx
-    y += dy
-    return x, y
-
-
+# ===============================
+# RUTA PRINCIPAL
+# ===============================
 @app.route("/", methods=["GET", "POST"])
 def home():
-    if request.method == "GET":
-        return render_template_string(HTML_HOME, mensaje="", dni_default="50753101J")
+    mensaje = ""
 
-    archivo = request.files.get("file")
-    dni = (request.form.get("dni") or "50753101J").strip()
+    if request.method == "POST":
+        archivo = request.files.get("file")
 
-    if not archivo or archivo.filename == "":
-        return render_template_string(
-            HTML_HOME,
-            mensaje="No se seleccionó ningún archivo.",
-            dni_default=dni
-        )
+        if not archivo or archivo.filename == "":
+            mensaje = "No se seleccionó ningún archivo."
+            return render_template_string(HTML, mensaje=mensaje)
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    job_id = uuid.uuid4().hex[:10]
-    in_name = f"{stamp}_{job_id}.pdf"
-    in_path = os.path.join(UPLOAD_FOLDER, in_name)
-    archivo.save(in_path)
+        ruta_pdf = os.path.join(UPLOAD_FOLDER, archivo.filename)
+        archivo.save(ruta_pdf)
 
-    tipo = detectar_tipo_pdf(in_path)
-    if tipo != "editable":
-        msg = f"PDF detectado como: {tipo}. Este modo funciona con PDFs editables."
-        return render_template_string(HTML_HOME, mensaje=msg, dni_default=dni)
+        tipo = detectar_tipo_pdf(ruta_pdf)
 
-    out_name = f"{stamp}_{job_id}_rellenado.pdf"
-    out_path = os.path.join(OUTPUT_FOLDER, out_name)
+        try:
+            doc = fitz.open(ruta_pdf)
+            page = doc[0]
 
-    try:
-        doc = fitz.open(in_path)
-        page = doc[0]
+            # ===============================
+            # INSERTAR DNI (YA DESPLAZADO)
+            # ===============================
+            insertar_texto_centrado(
+                page,
+                DNI_RECT,
+                PERFIL.get("dni", "")
+            )
 
-        x, y = posicion_centrada(
-            DNI_RECT,
-            dni,
-            fontname=FONT_NAME,
-            fontsize=FONT_SIZE,
-            dx=DX_OPTICO,
-            dy=DY_OPTICO,
-        )
+            salida = ruta_pdf.replace(".pdf", "_rellenado.pdf")
+            doc.save(salida)
+            doc.close()
 
-        page.insert_text(
-            (x, y),
-            dni,
-            fontname=FONT_NAME,
-            fontsize=FONT_SIZE,
-            color=(0, 0, 0),
-        )
+            mensaje = f"PDF procesado correctamente ({tipo})."
 
-        doc.save(out_path)
-        doc.close()
+        except Exception as e:
+            mensaje = f"Error procesando PDF: {e}"
 
-    except Exception as e:
-        return render_template_string(
-            HTML_HOME,
-            mensaje=f"Error generando PDF: {e}",
-            dni_default=dni
-        )
+    return render_template_string(HTML, mensaje=mensaje)
 
-    return render_template_string(
-        HTML_RESULT,
-        filename=out_name,
-        download_url=url_for("download_file", filename=out_name),
-        print_url=url_for("print_file", filename=out_name),
-        home_url=url_for("home"),
-    )
-
-
-@app.route("/download/<filename>")
-def download_file(filename):
-    path = os.path.join(OUTPUT_FOLDER, filename)
-    return send_file(path, as_attachment=True, download_name=filename)
-
-
-@app.route("/print/<filename>")
-def print_file(filename):
-    path = os.path.join(OUTPUT_FOLDER, filename)
-    return send_file(path, as_attachment=False, mimetype="application/pdf")
-
-
+# ===============================
+# RUN
+# ===============================
 if __name__ == "__main__":
     app.run(debug=True)
