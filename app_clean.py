@@ -15,16 +15,16 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # CALIBRACIÓN (AJUSTA AQUÍ)
 # =========================
 
-# 🔧 Rectángulo del campo DNI (AJUSTADO MÁS ABAJO)
+# Rectángulo del campo DNI
 DNI_RECT = fitz.Rect(90, 255, 250, 275)
 
 # Fuente y tamaño
 FONT_NAME = "helv"
 FONT_SIZE = 10
 
-# Microajustes ópticos (neutros para primera prueba)
-DX_OPTICO = 0.0
-DY_OPTICO = 0.0
+# 🔧 Microajustes finos (NUEVOS)
+DX_OPTICO = -28.0   # ← mueve a la izquierda
+DY_OPTICO = 2.5     # ↓ baja ligeramente
 
 
 HTML_HOME = """
@@ -100,28 +100,17 @@ def detectar_tipo_pdf(ruta_pdf: str) -> str:
         return "error"
 
 
-# =========================
-# CENTRADO VERTICAL ESTABLE
-# =========================
 def baseline_y_centrado_vertical(rect: fitz.Rect, fontsize: float) -> float:
-    """
-    Baseline óptica estable para formularios reales.
-    Ajuste 0.33 probado para Helvetica en cajas bajas.
-    """
     return rect.y0 + rect.height / 2 + fontsize * 0.33
 
 
 def posicion_centrada(rect: fitz.Rect, texto: str, fontname: str, fontsize: float,
                        dx: float = 0.0, dy: float = 0.0):
 
-    # ancho del texto
     w = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
     x = rect.x0 + (rect.width - w) / 2.0
-
-    # baseline vertical
     y = baseline_y_centrado_vertical(rect, fontsize)
 
-    # microajustes ópticos
     x += dx
     y += dy
 
@@ -143,7 +132,6 @@ def home():
             dni_default=dni
         )
 
-    # guardar entrada
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     job_id = uuid.uuid4().hex[:10]
     in_name = f"{stamp}_{job_id}.pdf"
@@ -155,7 +143,6 @@ def home():
         msg = f"PDF detectado como: {tipo}. Este modo funciona con PDFs editables."
         return render_template_string(HTML_HOME, mensaje=msg, dni_default=dni)
 
-    # salida
     out_name = f"{stamp}_{job_id}_rellenado.pdf"
     out_path = os.path.join(OUTPUT_FOLDER, out_name)
 
