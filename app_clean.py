@@ -43,17 +43,9 @@ HTML = """
 """
 
 # ===============================
-# RECTÁNGULO DNI
+# RECTÁNGULO DNI (ANDRATX — CAJA DEBAJO)
 # ===============================
-DNI_RECT_BASE = fitz.Rect(150, 250, 300, 280)
-DX_DNI = 68.0
-
-DNI_RECT = fitz.Rect(
-    DNI_RECT_BASE.x0 + DX_DNI,
-    DNI_RECT_BASE.y0,
-    DNI_RECT_BASE.x1 + DX_DNI,
-    DNI_RECT_BASE.y1
-)
+DNI_RECT = fitz.Rect(95, 230, 260, 255)
 
 # ===============================
 # CENTRADO REAL
@@ -61,9 +53,11 @@ DNI_RECT = fitz.Rect(
 def insertar_texto_centrado(page, rect, texto, fontsize=11):
     fontname = "helv"
 
+    # ancho texto
     text_width = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
     x = rect.x0 + (rect.width - text_width) / 2
 
+    # centrado vertical real
     font = fitz.Font(fontname)
     asc = font.ascender
     desc = font.descender
@@ -126,6 +120,9 @@ def home():
             doc = fitz.open(ruta_pdf)
             page = doc[0]
 
+            # ===============================
+            # INSERTAR DNI
+            # ===============================
             insertar_texto_centrado(
                 page,
                 DNI_RECT,
@@ -150,7 +147,7 @@ def home():
     )
 
 # ===============================
-# DESCARGA
+# DESCARGAR
 # ===============================
 @app.route("/descargar")
 def descargar():
@@ -162,7 +159,7 @@ def descargar():
     return "No hay archivo para descargar."
 
 # ===============================
-# RUN
+# RUN LOCAL
 # ===============================
 if __name__ == "__main__":
     app.run(debug=True)
