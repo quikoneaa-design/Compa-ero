@@ -14,17 +14,17 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # =========================
 # CALIBRACIÓN (AJUSTA AQUÍ)
 # =========================
-
-# Rectángulo del campo DNI
-DNI_RECT = fitz.Rect(90, 255, 250, 275)
+# ✅ DNI: la CASILLA está DEBAJO del título "DNI-NIF" (columna izquierda)
+# Este rectángulo apunta a la caja debajo del rótulo, no al campo de correo de la derecha.
+DNI_RECT = fitz.Rect(35, 272, 125, 292)
 
 # Fuente y tamaño
 FONT_NAME = "helv"
 FONT_SIZE = 10
 
-# 🔧 Microajustes finos (NUEVOS)
-DX_OPTICO = -28.0   # ← mueve a la izquierda
-DY_OPTICO = 2.5     # ↓ baja ligeramente
+# Microajustes (neutros)
+DX_OPTICO = 0.0
+DY_OPTICO = 0.0
 
 
 HTML_HOME = """
@@ -101,19 +101,23 @@ def detectar_tipo_pdf(ruta_pdf: str) -> str:
 
 
 def baseline_y_centrado_vertical(rect: fitz.Rect, fontsize: float) -> float:
+    # Baseline óptica estable (para formularios)
     return rect.y0 + rect.height / 2 + fontsize * 0.33
 
 
-def posicion_centrada(rect: fitz.Rect, texto: str, fontname: str, fontsize: float,
-                       dx: float = 0.0, dy: float = 0.0):
-
+def posicion_centrada(
+    rect: fitz.Rect,
+    texto: str,
+    fontname: str,
+    fontsize: float,
+    dx: float = 0.0,
+    dy: float = 0.0
+):
     w = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
     x = rect.x0 + (rect.width - w) / 2.0
     y = baseline_y_centrado_vertical(rect, fontsize)
-
     x += dx
     y += dy
-
     return x, y
 
 
