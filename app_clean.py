@@ -57,7 +57,7 @@ def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
         pagina = doc[0]
         x = 150
         y = 250
-        pagina.insert_text((x, y), dni_valor, fontsize=12)
+        pagina.insert_text((x, y), dni_valor, fontsize=12, color=(0, 0, 0))
         print("⚠️ Usando fallback por coordenadas")
         return True
     except Exception as e:
@@ -73,18 +73,17 @@ def elegir_rectangulo_dni(pagina: fitz.Page):
     Prioridad:
     1. Coincidencias de 'DNI:'
     2. Si no hay, usar 'DNI'
-    3. Elegir el que esté más abajo (más probable campo)
+    3. Elegir el que esté más abajo
     """
 
-    # 🔍 Intento 1: buscar DNI:
+    # 🔍 Intento 1: DNI:
     resultados = pagina.search_for("DNI:")
 
     if resultados:
         print(f"🎯 Encontrados {len(resultados)} 'DNI:'")
-        # elegir el más bajo en la página
         return max(resultados, key=lambda r: r.y0)
 
-    # 🔍 Intento 2: buscar DNI genérico
+    # 🔍 Intento 2: DNI genérico
     resultados = pagina.search_for("DNI")
 
     if resultados:
@@ -95,7 +94,7 @@ def elegir_rectangulo_dni(pagina: fitz.Page):
 
 
 # ===============================
-# MOTOR HÍBRIDO V2
+# MOTOR HÍBRIDO V2.1
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
     try:
@@ -112,13 +111,21 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
             # 🔴 DEBUG VISUAL
             pagina.draw_rect(rect, color=(1, 0, 0), width=1)
 
-            # 📐 Posición a la derecha
-            x = rect.x1 + 10
-            y = rect.y0 + rect.height * 0.75
+            # ===============================
+            # 📐 POSICIÓN MEJORADA
+            # ===============================
+            x = rect.x1 + 15
+            y = rect.y0 + (rect.height / 2) + 4
 
             print(f"✏️ Insertando DNI en x={x}, y={y}")
 
-            pagina.insert_text((x, y), dni_valor, fontsize=12)
+            pagina.insert_text(
+                (x, y),
+                dni_valor,
+                fontsize=12,
+                color=(0, 0, 0),
+            )
+
             return True
 
         print("❌ No se encontró ningún DNI")
