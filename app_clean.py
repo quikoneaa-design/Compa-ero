@@ -50,18 +50,13 @@ HTML = """
 """
 
 # ===============================
-# MOTOR DNI (VERSIÓN BASE)
+# FALLBACK POR COORDENADAS
 # ===============================
-def rellenar_dni_por_coordenadas(doc: fitz.Document, dni_valor: str) -> bool:
-    """
-    Inserta el DNI en coordenadas fijas.
-    (Base estable sobre la que construiremos el híbrido)
-    """
-
+def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
     try:
         pagina = doc[0]
 
-        # ⚠️ COORDENADAS BASE (ajustables después)
+        # Coordenadas base (solo si falla el híbrido)
         x = 150
         y = 250
 
@@ -70,12 +65,51 @@ def rellenar_dni_por_coordenadas(doc: fitz.Document, dni_valor: str) -> bool:
             dni_valor,
             fontsize=12,
         )
-
         return True
+    except Exception as e:
+        print("Fallback error:", e)
+        return False
+
+
+# ===============================
+# MOTOR HÍBRIDO v1
+# ===============================
+def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
+    """
+    1. Busca texto 'DNI'
+    2. Si lo encuentra → escribe a la derecha
+    3. Si no → fallback por coordenadas
+    """
+
+    try:
+        pagina = doc[0]
+
+        # 🔍 Buscar la palabra DNI
+        resultados = pagina.search_for("DNI")
+
+        if resultados:
+            rect = resultados[0]
+
+            # 📐 Posición a la derecha del texto
+            x = rect.x1 + 10
+            y = rect.y0 + (rect.height / 2) + 4
+
+            pagina.insert_text(
+                (x, y),
+                dni_valor,
+                fontsize=12,
+            )
+
+            print("DNI insertado por detección de texto")
+            return True
+
+        # 🛟 Si no encuentra "DNI"
+        print("No se encontró 'DNI' → usando fallback")
+        return insertar_dni_fallback(doc, dni_valor)
 
     except Exception as e:
-        print("Error insertando DNI:", e)
-        return False
+        print("Error en híbrido:", e)
+        return insertar_dni_fallback(doc, dni_valor)
 
 
 # ===============================
@@ -85,7 +119,7 @@ def procesar_pdf(ruta_entrada: str, ruta_salida: str) -> bool:
     try:
         doc = fitz.open(ruta_entrada)
 
-        dni_ok = rellenar_dni_por_coordenadas(
+        dni_ok = rellenar_dni_hibrido(
             doc,
             PERFIL.get("dni", "")
         )
