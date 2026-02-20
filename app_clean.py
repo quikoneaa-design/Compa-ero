@@ -11,7 +11,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL (si existe)
+# PERFIL
 # ===============================
 PERFIL = {
     "dni": "50753101J",
@@ -27,7 +27,7 @@ if os.path.exists("perfil.json"):
         pass
 
 # ===============================
-# HTML SIMPLE
+# HTML
 # ===============================
 HTML = """
 <!doctype html>
@@ -50,49 +50,47 @@ HTML = """
 """
 
 # ===============================
-# FALLBACK POR COORDENADAS
+# FALLBACK
 # ===============================
 def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
     try:
         pagina = doc[0]
-
-        # Coordenadas base (solo si falla el híbrido)
         x = 150
         y = 250
 
-        pagina.insert_text(
-            (x, y),
-            dni_valor,
-            fontsize=12,
-        )
+        pagina.insert_text((x, y), dni_valor, fontsize=12)
+        print("⚠️ Usando fallback por coordenadas")
         return True
     except Exception as e:
-        print("Fallback error:", e)
+        print("❌ Error fallback:", e)
         return False
 
 
 # ===============================
-# MOTOR HÍBRIDO v1
+# MOTOR HÍBRIDO DIAGNÓSTICO
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
-    """
-    1. Busca texto 'DNI'
-    2. Si lo encuentra → escribe a la derecha
-    3. Si no → fallback por coordenadas
-    """
-
     try:
         pagina = doc[0]
 
-        # 🔍 Buscar la palabra DNI
+        print("🔍 Buscando texto 'DNI'...")
         resultados = pagina.search_for("DNI")
 
         if resultados:
             rect = resultados[0]
 
-            # 📐 Posición a la derecha del texto
+            print("✅ 'DNI' encontrado en:")
+            print(f"   x0={rect.x0}, y0={rect.y0}, x1={rect.x1}, y1={rect.y1}")
+            print(f"   width={rect.width}, height={rect.height}")
+
+            # 🔴 DIBUJAR RECTÁNGULO DEBUG
+            pagina.draw_rect(rect, color=(1, 0, 0), width=1)
+
+            # 📐 Posición a la derecha
             x = rect.x1 + 10
-            y = rect.y0 + (rect.height / 2) + 4
+            y = rect.y0 + rect.height * 0.75
+
+            print(f"✏️ Insertando DNI en x={x}, y={y}")
 
             pagina.insert_text(
                 (x, y),
@@ -100,15 +98,13 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
                 fontsize=12,
             )
 
-            print("DNI insertado por detección de texto")
             return True
 
-        # 🛟 Si no encuentra "DNI"
-        print("No se encontró 'DNI' → usando fallback")
+        print("⚠️ No se encontró 'DNI'")
         return insertar_dni_fallback(doc, dni_valor)
 
     except Exception as e:
-        print("Error en híbrido:", e)
+        print("❌ Error en híbrido:", e)
         return insertar_dni_fallback(doc, dni_valor)
 
 
@@ -119,23 +115,20 @@ def procesar_pdf(ruta_entrada: str, ruta_salida: str) -> bool:
     try:
         doc = fitz.open(ruta_entrada)
 
-        dni_ok = rellenar_dni_hibrido(
-            doc,
-            PERFIL.get("dni", "")
-        )
+        ok = rellenar_dni_hibrido(doc, PERFIL.get("dni", ""))
 
         doc.save(ruta_salida)
         doc.close()
 
-        return dni_ok
+        return ok
 
     except Exception as e:
-        print("Error procesando PDF:", e)
+        print("❌ Error procesando PDF:", e)
         return False
 
 
 # ===============================
-# RUTA PRINCIPAL
+# HOME
 # ===============================
 @app.route("/", methods=["GET", "POST"])
 def home():
