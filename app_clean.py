@@ -57,7 +57,6 @@ def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
         pagina = doc[0]
         x = 150
         y = 250
-
         pagina.insert_text((x, y), dni_valor, fontsize=12)
         print("⚠️ Usando fallback por coordenadas")
         return True
@@ -67,23 +66,50 @@ def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
 
 
 # ===============================
-# MOTOR HÍBRIDO DIAGNÓSTICO
+# SELECCIÓN INTELIGENTE
+# ===============================
+def elegir_rectangulo_dni(pagina: fitz.Page):
+    """
+    Prioridad:
+    1. Coincidencias de 'DNI:'
+    2. Si no hay, usar 'DNI'
+    3. Elegir el que esté más abajo (más probable campo)
+    """
+
+    # 🔍 Intento 1: buscar DNI:
+    resultados = pagina.search_for("DNI:")
+
+    if resultados:
+        print(f"🎯 Encontrados {len(resultados)} 'DNI:'")
+        # elegir el más bajo en la página
+        return max(resultados, key=lambda r: r.y0)
+
+    # 🔍 Intento 2: buscar DNI genérico
+    resultados = pagina.search_for("DNI")
+
+    if resultados:
+        print(f"⚠️ Encontrados {len(resultados)} 'DNI'")
+        return max(resultados, key=lambda r: r.y0)
+
+    return None
+
+
+# ===============================
+# MOTOR HÍBRIDO V2
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
     try:
         pagina = doc[0]
 
-        print("🔍 Buscando texto 'DNI'...")
-        resultados = pagina.search_for("DNI")
+        print("🔍 Buscando campo DNI (modo inteligente)...")
 
-        if resultados:
-            rect = resultados[0]
+        rect = elegir_rectangulo_dni(pagina)
 
-            print("✅ 'DNI' encontrado en:")
+        if rect:
+            print("✅ Rectángulo seleccionado:")
             print(f"   x0={rect.x0}, y0={rect.y0}, x1={rect.x1}, y1={rect.y1}")
-            print(f"   width={rect.width}, height={rect.height}")
 
-            # 🔴 DIBUJAR RECTÁNGULO DEBUG
+            # 🔴 DEBUG VISUAL
             pagina.draw_rect(rect, color=(1, 0, 0), width=1)
 
             # 📐 Posición a la derecha
@@ -92,15 +118,10 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
 
             print(f"✏️ Insertando DNI en x={x}, y={y}")
 
-            pagina.insert_text(
-                (x, y),
-                dni_valor,
-                fontsize=12,
-            )
-
+            pagina.insert_text((x, y), dni_valor, fontsize=12)
             return True
 
-        print("⚠️ No se encontró 'DNI'")
+        print("❌ No se encontró ningún DNI")
         return insertar_dni_fallback(doc, dni_valor)
 
     except Exception as e:
@@ -114,14 +135,10 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
 def procesar_pdf(ruta_entrada: str, ruta_salida: str) -> bool:
     try:
         doc = fitz.open(ruta_entrada)
-
         ok = rellenar_dni_hibrido(doc, PERFIL.get("dni", ""))
-
         doc.save(ruta_salida)
         doc.close()
-
         return ok
-
     except Exception as e:
         print("❌ Error procesando PDF:", e)
         return False
@@ -147,7 +164,6 @@ def home():
             ruta_salida = os.path.join(UPLOAD_FOLDER, "salida.pdf")
 
             archivo.save(ruta_entrada)
-
             ok = procesar_pdf(ruta_entrada, ruta_salida)
 
             if ok:
