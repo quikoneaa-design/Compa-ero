@@ -25,7 +25,7 @@ HTML = """
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Compañero - V2.17</title>
+  <title>Compañero - V2.18</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
     .box { padding: 14px; border: 1px solid #ddd; border-radius: 12px; max-width: 720px; }
@@ -34,8 +34,8 @@ HTML = """
 </head>
 <body>
   <div class="box">
-    <h2>Compañero — V2.17</h2>
-    <p class="muted">Sube el PDF. Descarga el resultado.</p>
+    <h2>Compañero — V2.18</h2>
+    <p class="muted">Selector DNI por contexto de línea.</p>
 
     <form method="post" enctype="multipart/form-data">
       <input type="file" name="file" accept="application/pdf" required>
@@ -64,4 +64,16 @@ def _write_text(page: fitz.Page, rect: fitz.Rect, text: str) -> int:
     fs = _fit_fontsize(text, rect)
     font = fitz.Font("helv")
 
-    text
+    text_w = font.text_length(text, fontsize=fs)
+    x = rect.x0 + (rect.width - text_w) / 2
+    y = rect.y0 + rect.height * 0.7
+
+    page.insert_text((x, y), text, fontsize=fs, fontname="helv", overlay=True)
+    return fs
+
+def _find_form_line_near_label(page: fitz.Page, label: fitz.Rect):
+    """
+    Busca líneas horizontales cerca del label (típicas de campos de formulario).
+    """
+    drawings = page.get_drawings()
+    candidatos = []
