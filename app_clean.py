@@ -1,9 +1,7 @@
-# app_clean.py — V2.24 (arranque limpio verificado Railway)
-
-from flask import Flask, request, render_template_string, send_file, redirect, url_for
+from flask import Flask, request, render_template_string, send_file
 import os
-import json
 import fitz  # PyMuPDF
+import json
 
 app = Flask(__name__)
 
@@ -13,166 +11,164 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL SEGURO
+# PERFIL
 # ===============================
-DEFAULT_PERFIL = {"dni": "50753101J"}
+with open("perfil.json", "r", encoding="utf-8") as f:
+    PERFIL = json.load(f)
 
-try:
-    if os.path.exists("perfil.json"):
-        with open("perfil.json", "r", encoding="utf-8") as f:
-            PERFIL = json.load(f)
-    else:
-        PERFIL = DEFAULT_PERFIL
-        with open("perfil.json", "w", encoding="utf-8") as f:
-            json.dump(PERFIL, f, ensure_ascii=False, indent=2)
-except Exception:
-    PERFIL = DEFAULT_PERFIL
+DNI_USUARIO = PERFIL.get("dni", "").strip()
 
 # ===============================
 # HTML
 # ===============================
 HTML = """
 <!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Compañero - V2.24</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
-    .box { padding: 14px; border: 1px solid #ddd; border-radius: 12px; max-width: 720px; }
-    .muted { color: #666; font-size: 14px; }
-    button { padding: 8px 14px; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <h2>Compañero — V2.24</h2>
-    <p class="muted">Motor DNI estable.</p>
+<title>Compañero V3</title>
 
-    <form method="post" enctype="multipart/form-data">
-      <input type="file" name="file" accept="application/pdf" required>
-      <button type="submit">Procesar</button>
-    </form>
+<h1>Compañero — Motor DNI V3</h1>
 
-    {% if archivo %}
-      <hr>
-      <p><a href="/descargar">Descargar PDF</a></p>
-      <p class="muted">{{ mensaje }}</p>
-    {% endif %}
-  </div>
-</body>
-</html>
+<form method="post" enctype="multipart/form-data">
+  <input type="file" name="file" accept="application/pdf" required>
+  <input type="submit" value="Subir PDF">
+</form>
+
+{% if listo %}
+<hr>
+<h3>Documento procesado</h3>
+<a href="/descargar">Descargar PDF</a>
+{% endif %}
 """
 
 # ===============================
 # UTILIDADES
 # ===============================
-def seleccionar_label_dni(page):
-    try:
-        zonas = page.search_for("DNI")
-        if not zonas:
-            return None
-        zonas_ordenadas = sorted(zonas, key=lambda r: r.y0)
-        return zonas_ordenadas[-1]
-    except Exception:
-        return None
+def normalizar(texto):
+    return texto.upper().replace(".", "").replace(" ", "")
 
+def es_label_dni(texto):
+    t = normalizar(texto)
+    claves = ["DNI", "DNINIF", "NIF"]
+    return any(c in t for c in claves)
 
-def escribir_dni(page, rect, texto):
-    try:
-        font = fitz.Font("helv")
-        fontsize = 12
-        ancho = font.text_length(texto, fontsize=fontsize)
+def calcular_rect_derecha(rect):
+    return fitz.Rect(
+        rect.x1 + 5,
+        rect.y0 - 2,
+        rect.x1 + 220,
+        rect.y1 + 2,
+    )
 
-        x = rect.x0 + (rect.width - ancho) / 2
-        y = rect.y0 + rect.height * 0.7
+def calcular_rect_debajo(rect):
+    altura = rect.height
+    return fitz.Rect(
+        rect.x0,
+        rect.y1 + 4,
+        rect.x0 + 260,
+        rect.y1 + altura + 18,
+    )
 
-        page.insert_text(
-            (x, y),
-            texto,
-            fontsize=fontsize,
-            fontname="helv",
-            overlay=True,
-        )
-    except Exception:
-        pass
+def hay_espacio_en_blanco(page, rect):
+    texto = page.get_textbox(rect).strip()
+    return len(texto) == 0
 
+def escribir_centrado(page, rect, texto):
+    fontsize = 11
+    fontname = "helv"
+
+    text_width = fitz.get_text_length(texto, fontname=fontname, fontsize=fontsize)
+    x = rect.x0 + (rect.width - text_width) / 2
+
+    y = rect.y0 + rect.height / 2 + fontsize / 2 - 2
+
+    page.insert_text(
+        (x, y),
+        texto,
+        fontsize=fontsize,
+        fontname=fontname,
+        fill=(0, 0, 0),
+        overlay=True,
+    )
 
 # ===============================
-# RUTA PRINCIPAL
+# MOTOR PRINCIPAL
+# ===============================
+def procesar_pdf(input_path, output_path):
+    doc = fitz.open(input_path)
+
+    for page in doc:
+        palabras = page.get_text("words")
+
+        candidatos = []
+
+        # 1. Detectar labels válidos
+        for w in palabras:
+            x0, y0, x1, y1, texto, *_ = w
+
+            if es_label_dni(texto):
+                rect_label = fitz.Rect(x0, y0, x1, y1)
+
+                rect_der = calcular_rect_derecha(rect_label)
+                rect_abajo = calcular_rect_debajo(rect_label)
+
+                score = 0
+
+                if hay_espacio_en_blanco(page, rect_der):
+                    score += 2
+                    zona = rect_der
+                elif hay_espacio_en_blanco(page, rect_abajo):
+                    score += 1
+                    zona = rect_abajo
+                else:
+                    zona = rect_der  # fallback
+
+                candidatos.append((score, zona))
+
+        # 2. Elegir mejor candidato
+        if candidatos:
+            candidatos.sort(key=lambda x: x[0], reverse=True)
+            mejor_rect = candidatos[0][1]
+
+            # DEBUG visual suave (puedes comentar luego)
+            page.draw_rect(mejor_rect, color=(0, 0, 1), width=1)
+
+            # 🔥 MODO A — sobrescribir siempre
+            escribir_centrado(page, mejor_rect, DNI_USUARIO)
+
+    doc.save(output_path)
+    doc.close()
+
+# ===============================
+# RUTAS
 # ===============================
 @app.route("/", methods=["GET", "POST"])
 def home():
     global ULTIMO_ARCHIVO
 
+    listo = False
+
     if request.method == "POST":
-        try:
-            archivo = request.files.get("file")
+        archivo = request.files.get("file")
+        if archivo:
+            input_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
+            output_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
 
-            if not archivo or archivo.filename == "":
-                return "No se subió archivo", 400
+            archivo.save(input_path)
 
-            ruta_entrada = os.path.join(UPLOAD_FOLDER, archivo.filename)
-            archivo.save(ruta_entrada)
+            procesar_pdf(input_path, output_path)
 
-            doc = fitz.open(ruta_entrada)
-            page = doc[0]
+            ULTIMO_ARCHIVO = output_path
+            listo = True
 
-            dni = PERFIL.get("dni", "50753101J")
-            mensaje = ""
-
-            label = seleccionar_label_dni(page)
-
-            if label:
-                page.draw_rect(label, color=(1, 0, 0), width=1, overlay=True)
-
-                destino = fitz.Rect(
-                    label.x1 + 10,
-                    label.y0 - 2,
-                    label.x1 + 310,
-                    label.y1 + 2,
-                )
-
-                page.draw_rect(destino, color=(0, 0, 1), width=1, overlay=True)
-                escribir_dni(page, destino, dni)
-                mensaje = "DNI insertado"
-            else:
-                mensaje = "No se encontró DNI"
-
-            ruta_salida = os.path.join(UPLOAD_FOLDER, "documento_rellenado.pdf")
-            doc.save(ruta_salida, garbage=4, deflate=True)
-            doc.close()
-
-            ULTIMO_ARCHIVO = ruta_salida
-            return render_template_string(HTML, archivo=True, mensaje=mensaje)
-
-        except Exception as e:
-            return f"ERROR INTERNO: {e}", 500
-
-    return render_template_string(HTML, archivo=False)
-
+    return render_template_string(HTML, listo=listo)
 
 @app.route("/descargar")
 def descargar():
-    global ULTIMO_ARCHIVO
-    if not ULTIMO_ARCHIVO or not os.path.exists(ULTIMO_ARCHIVO):
-        return "No hay archivo", 404
-    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
-
-@app.route("/health")
-def health():
-    return "OK", 200
-
-
-@app.route("/<path:anypath>")
-def catch_all(anypath):
-    return redirect(url_for("home"))
-
+    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
+        return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+    return "No hay archivo."
 
 # ===============================
 # MAIN
 # ===============================
 if __name__ == "__main__":
-    puerto = int(os.environ.get("PORT", "5000"))
-    app.run(host="0.0.0.0", port=puerto)
+    app.run(host="0.0.0.0", port=5000, debug=True)
