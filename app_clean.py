@@ -73,7 +73,7 @@ def rellenar_dni(doc, dni_valor):
     try:
         pagina = doc[0]
 
-        # 🔧 RECT ESTABILIZADO (más realista)
+        # 🔧 RECT ACTUAL (ajustable fino)
         rect = fitz.Rect(170, 305, 390, 323)
 
         pagina.insert_textbox(
@@ -115,3 +115,45 @@ def home():
         try:
             doc = fitz.open(ruta_pdf)
 
+            # 🎯 Rellenar DNI desde perfil
+            dni_usuario = PERFIL.get("dni", "")
+            ok = rellenar_dni(doc, dni_usuario)
+
+            # 💾 Guardar resultado
+            salida = os.path.join(UPLOAD_FOLDER, "resultado.pdf")
+            doc.save(salida)
+            doc.close()
+
+            if ok:
+                mensaje = "✅ PDF procesado correctamente."
+                ULTIMO_ARCHIVO = salida
+                mostrar_descarga = True
+            else:
+                mensaje = "⚠️ PDF procesado, pero el DNI puede no estar bien colocado."
+                ULTIMO_ARCHIVO = salida
+                mostrar_descarga = True
+
+        except Exception as e:
+            mensaje = f"❌ Error procesando PDF: {e}"
+
+    return render_template_string(HTML, mensaje=mensaje, descargar=mostrar_descarga)
+
+
+# ===============================
+# DESCARGA
+# ===============================
+@app.route("/descargar")
+def descargar():
+    global ULTIMO_ARCHIVO
+
+    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
+        return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+
+    return "No hay archivo para descargar."
+
+
+# ===============================
+# MAIN
+# ===============================
+if __name__ == "__main__":
+    app.run(debug=True)
