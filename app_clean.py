@@ -55,10 +55,7 @@ HTML = """
 def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
     try:
         pagina = doc[0]
-        x = 150
-        y = 250
-        pagina.insert_text((x, y), dni_valor, fontsize=12, color=(0, 0, 0))
-        print("⚠️ Usando fallback por coordenadas")
+        pagina.insert_text((150, 250), dni_valor, fontsize=12, color=(0, 0, 0))
         return True
     except Exception as e:
         print("❌ Error fallback:", e)
@@ -66,7 +63,7 @@ def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
 
 
 # ===============================
-# SELECCIÓN INTELIGENTE
+# BUSCAR LABEL DNI
 # ===============================
 def elegir_rectangulo_dni(pagina: fitz.Page):
     resultados = pagina.search_for("DNI:")
@@ -81,7 +78,7 @@ def elegir_rectangulo_dni(pagina: fitz.Page):
 
 
 # ===============================
-# MOTOR HÍBRIDO V2.3 (QUIRÚRGICO)
+# 🔥 MOTOR HÍBRIDO V2.4 (ANCLADO A LÍNEA REAL)
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
     try:
@@ -91,108 +88,8 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
         if not rect:
             return insertar_dni_fallback(doc, dni_valor)
 
-        # 🔴 DEBUG label
+        # 🔴 debug label
         pagina.draw_rect(rect, color=(1, 0, 0), width=1)
 
         altura = rect.height
-        centro_y = rect.y0 + altura / 2
-
-        # 📐 Caja quirúrgica estable
-        box = fitz.Rect(
-            rect.x1 + 8,
-            centro_y - (altura * 0.9),
-            rect.x1 + 240,
-            centro_y + (altura * 0.9),
-        )
-
-        # 🔵 DEBUG caja destino
-        pagina.draw_rect(box, color=(0, 0, 1), width=1)
-
-        pagina.insert_textbox(
-            box,
-            dni_valor,
-            fontsize=altura * 0.9,
-            color=(0, 0, 0),
-            align=fitz.TEXT_ALIGN_LEFT,
-        )
-
-        return True
-
-    except Exception as e:
-        print("❌ Error en híbrido:", e)
-        return insertar_dni_fallback(doc, dni_valor)
-
-
-# ===============================
-# PROCESAR PDF
-# ===============================
-def procesar_pdf(ruta_entrada: str, ruta_salida: str) -> bool:
-    try:
-        doc = fitz.open(ruta_entrada)
-        ok = rellenar_dni_hibrido(doc, PERFIL.get("dni", ""))
-        doc.save(ruta_salida)
-        doc.close()
-        return ok
-    except Exception as e:
-        print("❌ Error procesando PDF:", e)
-        return False
-
-
-# ===============================
-# HOME
-# ===============================
-@app.route("/", methods=["GET", "POST"])
-def home():
-    global ULTIMO_ARCHIVO
-
-    mensaje = ""
-    archivo_generado = False
-
-    if request.method == "POST":
-        archivo = request.files.get("file")
-
-        if not archivo or archivo.filename == "":
-            mensaje = "No se seleccionó ningún archivo."
-        else:
-            ruta_entrada = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
-            ruta_salida = os.path.join(UPLOAD_FOLDER, "salida.pdf")
-
-            archivo.save(ruta_entrada)
-            ok = procesar_pdf(ruta_entrada, ruta_salida)
-
-            if ok:
-                mensaje = "PDF procesado correctamente."
-                ULTIMO_ARCHIVO = ruta_salida
-                archivo_generado = True
-            else:
-                mensaje = "No se pudo procesar el PDF."
-
-    return render_template_string(
-        HTML,
-        mensaje=mensaje,
-        archivo=archivo_generado
-    )
-
-
-# ===============================
-# DESCARGA
-# ===============================
-@app.route("/descargar")
-def descargar():
-    global ULTIMO_ARCHIVO
-
-    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
-        return send_file(
-            ULTIMO_ARCHIVO,
-            as_attachment=True,
-            download_name="documento_rellenado.pdf"
-        )
-
-    return "No hay archivo disponible.", 404
-
-
-# ===============================
-# MAIN
-# ===============================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        y_linea = rect.y1 - altura * 0.
