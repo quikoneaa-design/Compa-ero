@@ -115,39 +115,3 @@ def home():
         try:
             doc = fitz.open(ruta_pdf)
 
-            rellenar_dni(doc, PERFIL.get("dni", ""))
-
-            salida = ruta_pdf.replace(".pdf", "_rellenado.pdf")
-            doc.save(salida)
-            doc.close()
-
-            ULTIMO_ARCHIVO = salida
-            mensaje = "DNI rellenado correctamente."
-            mostrar_descarga = True
-
-        except Exception as e:
-            mensaje = f"Error procesando PDF: {e}"
-
-    return render_template_string(
-        HTML,
-        mensaje=mensaje,
-        descargar=mostrar_descarga
-    )
-
-# ===============================
-# DESCARGAR
-# ===============================
-@app.route("/descargar")
-def descargar():
-    global ULTIMO_ARCHIVO
-
-    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
-        return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
-    return "No hay archivo para descargar."
-
-# ===============================
-# RUN
-# ===============================
-if __name__ == "__main__":
-    app.run(debug=True)
