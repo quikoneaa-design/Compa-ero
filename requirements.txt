@@ -1,6 +1,4 @@
-flask
+Flask
 gunicorn
 PyMuPDF
-Pillow
-pytesseract
 requests
