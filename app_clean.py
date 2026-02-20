@@ -69,70 +69,54 @@ def insertar_dni_fallback(doc: fitz.Document, dni_valor: str) -> bool:
 # SELECCIÓN INTELIGENTE
 # ===============================
 def elegir_rectangulo_dni(pagina: fitz.Page):
-    """
-    Prioridad:
-    1. Coincidencias de 'DNI:'
-    2. Si no hay, usar 'DNI'
-    3. Elegir el que esté más abajo
-    """
-
     resultados = pagina.search_for("DNI:")
-
     if resultados:
-        print(f"🎯 Encontrados {len(resultados)} 'DNI:'")
         return max(resultados, key=lambda r: r.y0)
 
     resultados = pagina.search_for("DNI")
-
     if resultados:
-        print(f"⚠️ Encontrados {len(resultados)} 'DNI'")
         return max(resultados, key=lambda r: r.y0)
 
     return None
 
 
 # ===============================
-# MOTOR HÍBRIDO V2.2 (TEXTBOX)
+# MOTOR HÍBRIDO V2.3 (QUIRÚRGICO)
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
     try:
         pagina = doc[0]
-
-        print("🔍 Buscando campo DNI (modo inteligente)...")
-
         rect = elegir_rectangulo_dni(pagina)
 
-        if rect:
-            print("✅ Rectángulo seleccionado:")
-            print(f"   x0={rect.x0}, y0={rect.y0}, x1={rect.x1}, y1={rect.y1}")
+        if not rect:
+            return insertar_dni_fallback(doc, dni_valor)
 
-            # 🔴 DEBUG VISUAL
-            pagina.draw_rect(rect, color=(1, 0, 0), width=1)
+        # 🔴 DEBUG label
+        pagina.draw_rect(rect, color=(1, 0, 0), width=1)
 
-            # ===============================
-            # 📐 CAJA DE TEXTO ROBUSTA
-            # ===============================
-            box = fitz.Rect(
-                rect.x1 + 10,
-                rect.y0 - 2,
-                rect.x1 + 220,
-                rect.y1 + 6,
-            )
+        altura = rect.height
+        centro_y = rect.y0 + altura / 2
 
-            print(f"🧪 Caja de texto: {box}")
+        # 📐 Caja quirúrgica estable
+        box = fitz.Rect(
+            rect.x1 + 8,
+            centro_y - (altura * 0.9),
+            rect.x1 + 240,
+            centro_y + (altura * 0.9),
+        )
 
-            pagina.insert_textbox(
-                box,
-                dni_valor,
-                fontsize=12,
-                color=(0, 0, 0),
-                align=fitz.TEXT_ALIGN_LEFT,
-            )
+        # 🔵 DEBUG caja destino
+        pagina.draw_rect(box, color=(0, 0, 1), width=1)
 
-            return True
+        pagina.insert_textbox(
+            box,
+            dni_valor,
+            fontsize=altura * 0.9,
+            color=(0, 0, 0),
+            align=fitz.TEXT_ALIGN_LEFT,
+        )
 
-        print("❌ No se encontró ningún DNI")
-        return insertar_dni_fallback(doc, dni_valor)
+        return True
 
     except Exception as e:
         print("❌ Error en híbrido:", e)
