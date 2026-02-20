@@ -11,10 +11,16 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL
+# PERFIL (SEGURO)
 # ===============================
-with open("perfil.json", "r", encoding="utf-8") as f:
-    PERFIL = json.load(f)
+PERFIL = {"dni": ""}
+
+if os.path.exists("perfil.json"):
+    try:
+        with open("perfil.json", "r", encoding="utf-8") as f:
+            PERFIL = json.load(f)
+    except Exception as e:
+        print("Error leyendo perfil:", e)
 
 HTML = """
 <!doctype html>
@@ -40,40 +46,12 @@ HTML = """
 """
 
 # ===============================
-# 🎯 RELLENAR DNI (HÍBRIDO)
+# 🎯 RELLENAR DNI (fallback directo)
 # ===============================
 def rellenar_dni(doc, dni_valor):
-    """
-    1) Intenta rellenar widget (formularios reales)
-    2) Si no hay widget → escribe texto en coordenadas (fallback)
-    """
-
-    # ===== INTENTO 1: WIDGET =====
-    contador = 1
-    for pagina in doc:
-        widgets = pagina.widgets()
-        if not widgets:
-            continue
-
-        for w in widgets:
-            try:
-                if w.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
-                    if contador == 2:
-                        w.field_value = dni_valor
-                        w.update()
-                        print("✅ DNI rellenado en widget")
-                        return True
-                    contador += 1
-            except:
-                pass
-
-    # ===== INTENTO 2: FALLBACK COORDENADAS =====
-    print("⚠️ No hay widgets — usando modo coordenadas")
-
     try:
         pagina = doc[0]
 
-        # 🔧 RECT ACTUAL (ajustable fino)
         rect = fitz.Rect(170, 305, 390, 323)
 
         pagina.insert_textbox(
@@ -88,7 +66,7 @@ def rellenar_dni(doc, dni_valor):
         return True
 
     except Exception as e:
-        print("❌ Error en fallback:", e)
+        print("❌ Error escribiendo DNI:", e)
         return False
 
 
@@ -115,23 +93,16 @@ def home():
         try:
             doc = fitz.open(ruta_pdf)
 
-            # 🎯 Rellenar DNI desde perfil
             dni_usuario = PERFIL.get("dni", "")
-            ok = rellenar_dni(doc, dni_usuario)
+            rellenar_dni(doc, dni_usuario)
 
-            # 💾 Guardar resultado
             salida = os.path.join(UPLOAD_FOLDER, "resultado.pdf")
             doc.save(salida)
             doc.close()
 
-            if ok:
-                mensaje = "✅ PDF procesado correctamente."
-                ULTIMO_ARCHIVO = salida
-                mostrar_descarga = True
-            else:
-                mensaje = "⚠️ PDF procesado, pero el DNI puede no estar bien colocado."
-                ULTIMO_ARCHIVO = salida
-                mostrar_descarga = True
+            ULTIMO_ARCHIVO = salida
+            mensaje = "✅ PDF procesado correctamente."
+            mostrar_descarga = True
 
         except Exception as e:
             mensaje = f"❌ Error procesando PDF: {e}"
