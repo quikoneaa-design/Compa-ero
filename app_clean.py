@@ -1,92 +1,161 @@
-def rellenar_dni(doc: fitz.Document, dni_valor: str) -> bool:
-    """
-    PRIORIDAD:
-    1) Widget
-    2) Detectar etiqueta DNI/NIF por texto
-    3) Coordenadas fallback
-    """
+from flask import Flask, request, render_template_string, send_file
+import os
+import json
+import fitz  # PyMuPDF
 
-    # =================================================
-    # 1️⃣ WIDGET
-    # =================================================
-    contador = 1
-    for pagina in doc:
-        widgets = pagina.widgets()
-        if not widgets:
-            continue
-        for w in widgets:
-            try:
-                if w.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
-                    if contador == 2:
-                        w.field_value = dni_valor
-                        w.update()
-                        print("✅ DNI rellenado en widget")
-                        return True
-                    contador += 1
-            except:
-                pass
+app = Flask(__name__)
 
-    print("ℹ️ No hay widget — buscando etiqueta DNI")
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-    # =================================================
-    # 2️⃣ DETECCIÓN POR TEXTO (afinada para tu PDF limpio)
-    # =================================================
+ULTIMO_ARCHIVO = None
+
+# ===============================
+# PERFIL (si existe)
+# ===============================
+PERFIL = {
+    "dni": "50753101J",
+    "nombre": "Enrique",
+    "apellidos": "Afonso Álvarez"
+}
+
+if os.path.exists("perfil.json"):
     try:
-        for pagina in doc:
-            words = pagina.get_text("words")
+        with open("perfil.json", "r", encoding="utf-8") as f:
+            PERFIL = json.load(f)
+    except Exception:
+        pass
 
-            for w in words:
-                if len(w) < 5:
-                    continue
+# ===============================
+# HTML SIMPLE
+# ===============================
+HTML = """
+<!doctype html>
+<title>Compañero</title>
+<h1>Subir solicitud PDF</h1>
 
-                x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
-                t = text.strip().lower().replace(".", "").replace(":", "")
+<form method="post" enctype="multipart/form-data">
+  <input type="file" name="file" accept="application/pdf">
+  <input type="submit" value="Subir">
+</form>
 
-                if t in ("dni", "nif"):
-                    # 🎯 Caja justo al inicio de la línea
-                    alto = max(10, y1 - y0)
+{% if mensaje %}
+<p><b>{{ mensaje }}</b></p>
+{% endif %}
 
-                    rect = fitz.Rect(
-                        x1 + 6,          # pequeño espacio tras "DNI:"
-                        y0 - 1,          # micro ajuste vertical
-                        x1 + 200,        # ancho suficiente para el DNI
-                        y1 + 3
-                    )
+{% if archivo %}
+<hr>
+<a href="/descargar">Descargar PDF procesado</a>
+{% endif %}
+"""
 
-                    pagina.insert_textbox(
-                        rect,
-                        dni_valor,
-                        fontsize=11,
-                        align=0,  # izquierda (decisión global correcta)
-                        color=(0, 0, 0)
-                    )
+# ===============================
+# MOTOR DNI (VERSIÓN BASE)
+# ===============================
+def rellenar_dni_por_coordenadas(doc: fitz.Document, dni_valor: str) -> bool:
+    """
+    Inserta el DNI en coordenadas fijas.
+    (Base estable sobre la que construiremos el híbrido)
+    """
 
-                    print("✅ DNI escrito por detección de texto")
-                    return True
-
-    except Exception as e:
-        print("⚠️ Fallo en detección por texto:", e)
-
-    print("⚠️ Usando fallback por coordenadas")
-
-    # =================================================
-    # 3️⃣ FALLBACK (tu base estable)
-    # =================================================
     try:
         pagina = doc[0]
-        rect = fitz.Rect(170, 305, 390, 323)
 
-        pagina.insert_textbox(
-            rect,
+        # ⚠️ COORDENADAS BASE (ajustables después)
+        x = 150
+        y = 250
+
+        pagina.insert_text(
+            (x, y),
             dni_valor,
-            fontsize=11,
-            align=1,
-            color=(0, 0, 0)
+            fontsize=12,
         )
 
-        print("✅ DNI escrito por coordenadas")
         return True
 
     except Exception as e:
-        print("❌ Error escribiendo DNI:", e)
+        print("Error insertando DNI:", e)
         return False
+
+
+# ===============================
+# PROCESAR PDF
+# ===============================
+def procesar_pdf(ruta_entrada: str, ruta_salida: str) -> bool:
+    try:
+        doc = fitz.open(ruta_entrada)
+
+        dni_ok = rellenar_dni_por_coordenadas(
+            doc,
+            PERFIL.get("dni", "")
+        )
+
+        doc.save(ruta_salida)
+        doc.close()
+
+        return dni_ok
+
+    except Exception as e:
+        print("Error procesando PDF:", e)
+        return False
+
+
+# ===============================
+# RUTA PRINCIPAL
+# ===============================
+@app.route("/", methods=["GET", "POST"])
+def home():
+    global ULTIMO_ARCHIVO
+
+    mensaje = ""
+    archivo_generado = False
+
+    if request.method == "POST":
+        archivo = request.files.get("file")
+
+        if not archivo or archivo.filename == "":
+            mensaje = "No se seleccionó ningún archivo."
+        else:
+            ruta_entrada = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
+            ruta_salida = os.path.join(UPLOAD_FOLDER, "salida.pdf")
+
+            archivo.save(ruta_entrada)
+
+            ok = procesar_pdf(ruta_entrada, ruta_salida)
+
+            if ok:
+                mensaje = "PDF procesado correctamente."
+                ULTIMO_ARCHIVO = ruta_salida
+                archivo_generado = True
+            else:
+                mensaje = "No se pudo procesar el PDF."
+
+    return render_template_string(
+        HTML,
+        mensaje=mensaje,
+        archivo=archivo_generado
+    )
+
+
+# ===============================
+# DESCARGA
+# ===============================
+@app.route("/descargar")
+def descargar():
+    global ULTIMO_ARCHIVO
+
+    if ULTIMO_ARCHIVO and os.path.exists(ULTIMO_ARCHIVO):
+        return send_file(
+            ULTIMO_ARCHIVO,
+            as_attachment=True,
+            download_name="documento_rellenado.pdf"
+        )
+
+    return "No hay archivo disponible.", 404
+
+
+# ===============================
+# MAIN
+# ===============================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
