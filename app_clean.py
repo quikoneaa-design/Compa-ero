@@ -73,14 +73,15 @@ def rellenar_dni(doc, dni_valor):
     try:
         pagina = doc[0]
 
-        # 🔴 AJUSTABLE — caja aproximada del DNI en el PDF de prueba
-        rect = fitz.Rect(160, 300, 400, 330)
+        # 🔧 RECT ESTABILIZADO (más realista)
+        rect = fitz.Rect(170, 305, 390, 323)
 
         pagina.insert_textbox(
             rect,
             dni_valor,
-            fontsize=12,
-            align=1  # centrado horizontal
+            fontsize=11,
+            align=1,
+            color=(0, 0, 0)
         )
 
         print("✅ DNI escrito por coordenadas")
