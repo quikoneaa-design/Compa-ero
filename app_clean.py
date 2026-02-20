@@ -76,14 +76,12 @@ def elegir_rectangulo_dni(pagina: fitz.Page):
     3. Elegir el que esté más abajo
     """
 
-    # 🔍 Intento 1: DNI:
     resultados = pagina.search_for("DNI:")
 
     if resultados:
         print(f"🎯 Encontrados {len(resultados)} 'DNI:'")
         return max(resultados, key=lambda r: r.y0)
 
-    # 🔍 Intento 2: DNI genérico
     resultados = pagina.search_for("DNI")
 
     if resultados:
@@ -94,7 +92,7 @@ def elegir_rectangulo_dni(pagina: fitz.Page):
 
 
 # ===============================
-# MOTOR HÍBRIDO V2.1
+# MOTOR HÍBRIDO V2.2 (TEXTBOX)
 # ===============================
 def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
     try:
@@ -112,18 +110,23 @@ def rellenar_dni_hibrido(doc: fitz.Document, dni_valor: str) -> bool:
             pagina.draw_rect(rect, color=(1, 0, 0), width=1)
 
             # ===============================
-            # 📐 POSICIÓN MEJORADA
+            # 📐 CAJA DE TEXTO ROBUSTA
             # ===============================
-            x = rect.x1 + 15
-            y = rect.y0 + (rect.height / 2) + 4
+            box = fitz.Rect(
+                rect.x1 + 10,
+                rect.y0 - 2,
+                rect.x1 + 220,
+                rect.y1 + 6,
+            )
 
-            print(f"✏️ Insertando DNI en x={x}, y={y}")
+            print(f"🧪 Caja de texto: {box}")
 
-            pagina.insert_text(
-                (x, y),
+            pagina.insert_textbox(
+                box,
                 dni_valor,
                 fontsize=12,
                 color=(0, 0, 0),
+                align=fitz.TEXT_ALIGN_LEFT,
             )
 
             return True
