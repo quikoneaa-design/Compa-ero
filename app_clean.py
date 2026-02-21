@@ -1,4 +1,4 @@
-# app_clean.py — V4.2 (Guardado seguro + microajuste izquierda)
+# app_clean.py — V4.4 (Detector debajo definitivo Andratx)
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -24,7 +24,7 @@ DNI_USUARIO = PERFIL.get("dni", "").strip()
 # AJUSTES FINOS
 # ===============================
 FONT_SIZE = 12
-DX = -1.2   # micro-movimiento izquierda
+DX = -1.2
 DY = 0.0
 
 # ===============================
@@ -32,9 +32,9 @@ DY = 0.0
 # ===============================
 HTML = """
 <!doctype html>
-<title>Compañero V4.2</title>
+<title>Compañero V4.4</title>
 
-<h1>Compañero — DNI automático en casilla (Andratx V4.2)</h1>
+<h1>Compañero — DNI automático Andratx V4.4</h1>
 
 <form method="post" enctype="multipart/form-data">
   <p><input type="file" name="pdf">
@@ -48,40 +48,52 @@ HTML = """
 """
 
 # ===============================
-# DETECTAR LABEL DNI
+# BUSCAR LABEL
 # ===============================
 def find_dni_label(page):
-    palabras = page.search_for("DNI-NIF")
-    if not palabras:
-        palabras = page.search_for("DNI")
-    if not palabras:
-        palabras = page.search_for("NIF")
-    return palabras[0] if palabras else None
+    for texto in ["DNI-NIF", "DNI / NIF", "DNI", "NIF"]:
+        r = page.search_for(texto)
+        if r:
+            return r[0]
+    return None
 
 # ===============================
-# ENCONTRAR CAJA A LA DERECHA
+# BUSCAR CAJA DEBAJO
 # ===============================
-def find_box_right_of_label(page, label_rect):
+def find_box_below_label(page, label_rect):
     drawings = page.get_drawings()
-    candidate_boxes = []
+    candidatos = []
 
     for d in drawings:
         for item in d["items"]:
             if item[0] == "re":
                 rect = fitz.Rect(item[1])
 
-                if (
-                    rect.x0 > label_rect.x1
-                    and abs(rect.y0 - label_rect.y0) < 20
-                    and rect.width > 80
-                    and rect.height < 40
-                ):
-                    candidate_boxes.append(rect)
+                # 1️⃣ Debajo obligatorio
+                if rect.y0 <= label_rect.y1:
+                    continue
 
-    if candidate_boxes:
-        return sorted(candidate_boxes, key=lambda r: r.x0)[0]
+                # 2️⃣ Alineación horizontal (misma columna aproximada)
+                if rect.x1 < label_rect.x0 - 30:
+                    continue
+                if rect.x0 > label_rect.x1 + 150:
+                    continue
 
-    return None
+                # 3️⃣ Tamaño típico de campo DNI (pequeño, no marco grande)
+                if rect.width < 100 or rect.width > 400:
+                    continue
+                if rect.height < 12 or rect.height > 35:
+                    continue
+
+                distancia = rect.y0 - label_rect.y1
+                candidatos.append((distancia, rect))
+
+    if not candidatos:
+        return None
+
+    # 4️⃣ Elegimos el más cercano verticalmente
+    candidatos.sort(key=lambda x: x[0])
+    return candidatos[0][1]
 
 # ===============================
 # INSERTAR DNI
@@ -120,13 +132,11 @@ def index():
 
             label_rect = find_dni_label(page)
             if label_rect:
-                box = find_box_right_of_label(page, label_rect)
+                box = find_box_below_label(page, label_rect)
                 if box:
                     insert_dni(page, box)
 
             salida = os.path.join(UPLOAD_FOLDER, "rellenado.pdf")
-
-            # 🔥 Guardado seguro
             doc.save(salida, garbage=4, deflate=True, clean=True)
             doc.close()
 
