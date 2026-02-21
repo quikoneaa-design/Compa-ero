@@ -1,5 +1,4 @@
-# app_clean.py — Compañero V4.1 (Andratx) — Motor GENÉRICO de campos (híbrido limpio)
-# Patrón: label -> casilla (debajo, fallback derecha) -> escribir centrado
+# app_clean.py — Compañero V4.1 (Andratx) — Motor GENÉRICO de campos (DNI + Email)
 # Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
 
 from flask import Flask, request, render_template_string, send_file
@@ -19,24 +18,27 @@ ULTIMO_ARCHIVO = None
 # ===============================
 DEFAULT_PERFIL = {
     "dni": "50753101J",
-    # Puedes ir añadiendo:
-    # "email": "tu@email.com",
-    # "telefono": "600000000",
-    # "nombre_entidad": "Enrique Afonso Álvarez",
+    # "email": "tuemail@dominio.com",
 }
 
-try:
+def load_perfil():
     if os.path.exists("perfil.json"):
-        with open("perfil.json", "r", encoding="utf-8") as f:
-            PERFIL = json.load(f)
-    else:
-        PERFIL = DEFAULT_PERFIL
-except Exception:
-    PERFIL = DEFAULT_PERFIL
+        try:
+            with open("perfil.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            return DEFAULT_PERFIL
+    return DEFAULT_PERFIL
 
-def _get_profile_value(key: str) -> str:
-    v = (PERFIL.get(key) or "").strip()
-    return v
+PERFIL = load_perfil()
+
+def get_profile_value(key):
+    v = PERFIL.get(key, "")
+    if v is None:
+        v = ""
+    return str(v).strip()
 
 # ===============================
 # HTML
@@ -73,7 +75,7 @@ HTML = """
 # HELPERS (texto / geometría)
 # ===============================
 
-def find_label_rect(page: fitz.Page, variantes: list[str]):
+def find_label_rect(page, variantes):
     found = []
     for v in variantes:
         if not v:
@@ -88,12 +90,10 @@ def find_label_rect(page: fitz.Page, variantes: list[str]):
     if not found:
         return None
 
-    # Primera aparición (arriba/izquierda)
     found.sort(key=lambda r: (r.y0, r.x0))
     return found[0]
 
-
-def iter_rectangles_from_drawings(page: fitz.Page):
+def iter_rectangles_from_drawings(page):
     try:
         drawings = page.get_drawings()
     except Exception:
@@ -101,43 +101,31 @@ def iter_rectangles_from_drawings(page: fitz.Page):
 
     for d in drawings:
         for it in d.get("items", []):
-            # item: ("re", rect, ...)
             if it and len(it) > 1 and it[0] == "re":
                 try:
                     yield fitz.Rect(it[1])
                 except Exception:
                     pass
 
-
-def x_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
+def x_overlap(a, b):
     x0 = max(a.x0, b.x0)
     x1 = min(a.x1, b.x1)
     ov = x1 - x0
     return ov if ov > 0 else 0.0
 
-
-def y_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
+def y_overlap(a, b):
     y0 = max(a.y0, b.y0)
     y1 = min(a.y1, b.y1)
     ov = y1 - y0
     return ov if ov > 0 else 0.0
 
-
-def _text_width(text: str, fontsize: float) -> float:
+def text_width(text, fontsize):
     try:
         return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
     except Exception:
         return len(text) * fontsize * 0.55
 
-
-def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
-    """
-    Selecciona la casilla asociada a un label.
-    Prioridad:
-      1) rectángulo debajo (misma columna)
-      2) rectángulo a la derecha (misma línea)
-    """
-    # Heurísticas "tipo casilla"
+def pick_box_rect_generic(page, label_rect):
     MIN_W = 35
     MAX_W = 260
     MIN_H = 10
@@ -150,8 +138,6 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
     right = []
 
     for r in iter_rectangles_from_drawings(page):
-
-        # descartar basura extrema
         if r.width < 25 or r.width > 600:
             continue
         if r.height < 6 or r.height > 200:
@@ -159,11 +145,10 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
 
         is_box_sized = (MIN_W <= r.width <= MAX_W and MIN_H <= r.height <= MAX_H)
 
-        # ---- PRIORIDAD: DEBAJO ----
+        # PRIORIDAD: DEBAJO
         if r.y0 >= (label_rect.y1 - 1):
             dy = r.y0 - label_rect.y1
             if 0 <= dy <= BELOW_MAX_DY:
-
                 ovx = x_overlap(r, label_rect)
                 r_cx = (r.x0 + r.x1) / 2.0
                 col_ok = (label_rect.x0 - 12) <= r_cx <= (label_rect.x1 + 12)
@@ -174,7 +159,7 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
                     score = (dy + width_penalty, size_bonus, r.width, r.x0)
                     below.append((score, r))
 
-        # ---- FALLBACK: DERECHA ----
+        # FALLBACK: DERECHA
         if r.x0 >= (label_rect.x1 - 2):
             ovy = y_overlap(r, label_rect)
             close_y = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0)) <= RIGHT_MAX_DY
@@ -198,12 +183,7 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
 
     return None
 
-
-def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
-    """
-    Escribe centrado dentro de 'box' con padding interno.
-    Devuelve fontsize final.
-    """
+def write_text_centered(page, box, text):
     text = (text or "").strip()
     if not text:
         return 0.0
@@ -221,14 +201,14 @@ def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
     fontsize = max(6.0, min(12.5, inner.height * 0.78))
 
     for _ in range(80):
-        tw = _text_width(text, fontsize)
+        tw = text_width(text, fontsize)
         if tw <= inner.width:
             break
         fontsize -= 0.2
         if fontsize < 5.5:
             break
 
-    tw = _text_width(text, fontsize)
+    tw = text_width(text, fontsize)
     x = inner.x0 + (inner.width - tw) / 2.0
     if x < inner.x0:
         x = inner.x0
@@ -246,11 +226,7 @@ def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
     )
     return fontsize
 
-
-def fill_field(page: fitz.Page, field_name: str, variantes_label: list[str], value: str, debug: bool, log: list[str]):
-    """
-    Rellena un campo usando label->casilla.
-    """
+def fill_field(page, field_name, variantes_label, value, debug, log):
     value = (value or "").strip()
     if not value:
         log.append(f"[{field_name}] saltado (sin valor en perfil).")
@@ -267,16 +243,15 @@ def fill_field(page: fitz.Page, field_name: str, variantes_label: list[str], val
         return False
 
     if debug:
-        page.draw_rect(label, color=(1, 0, 0), width=0.8)  # rojo label
-        page.draw_rect(box, color=(0, 0, 1), width=0.8)    # azul casilla
+        page.draw_rect(label, color=(1, 0, 0), width=0.8)
+        page.draw_rect(box, color=(0, 0, 1), width=0.8)
 
     fs = write_text_centered(page, box, value)
     log.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
     return True
 
-
 # ===============================
-# CAMPOS (pilotos)
+# CAMPOS (DNI + Email)
 # ===============================
 FIELD_SPECS = [
     {
@@ -295,26 +270,6 @@ FIELD_SPECS = [
             "E-mail",
         ],
     },
-    {
-        "name": "Teléfono",
-        "key": "telefono",
-        "labels": [
-            "Telèfon",
-            "Teléfono",
-            "Tel.",
-            "Telf",
-        ],
-    },
-    {
-        "name": "Nombre entidad/persona",
-        "key": "nombre_entidad",
-        "labels": [
-            "Nom de l'entitat o persona física",
-            "Nombre de la entidad o persona física",
-            "Nom de l'entitat",
-            "Nombre de la entidad",
-        ],
-    },
 ]
 
 # ===============================
@@ -328,7 +283,7 @@ def index():
     info_lines = []
     download = False
 
-    debug = request.args.get("debug", "").strip() in ("1", "true", "yes", "si", "sí")
+    debug = request.args.get("debug", "").strip().lower() in ("1", "true", "yes", "si", "sí")
 
     if request.method == "POST":
         f = request.files.get("pdf")
@@ -343,4 +298,38 @@ def index():
             doc = fitz.open(in_path)
             page = doc[0]
 
-            # Ejecutar relleno de campos
+            for spec in FIELD_SPECS:
+                fill_field(
+                    page=page,
+                    field_name=spec["name"],
+                    variantes_label=spec["labels"],
+                    value=get_profile_value(spec["key"]),
+                    debug=debug,
+                    log=info_lines
+                )
+
+            doc.save(out_path)
+            doc.close()
+
+            ULTIMO_ARCHIVO = out_path
+            download = True
+
+        except Exception as e:
+            info_lines.append("ERROR: " + str(e))
+            download = False
+
+    return render_template_string(
+        HTML,
+        info="\n".join(info_lines) if info_lines else None,
+        download=download
+    )
+
+@app.route("/download")
+def download_file():
+    global ULTIMO_ARCHIVO
+    if not ULTIMO_ARCHIVO:
+        return "No hay archivo.", 404
+    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
