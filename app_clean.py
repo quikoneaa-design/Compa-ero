@@ -1,5 +1,6 @@
-# app_clean.py — Compañero V4.1.2 (Andratx) — Motor GENÉRICO (DNI + Email)
-# ✅ Código COMPLETO listo para copiar/pegar
+# app_clean.py — Compañero V4.1.4 (Andratx) — Motor GENÉRICO (DNI + Email) con anclaje lógico
+# ✅ CÓDIGO COMPLETO
+# Email se elige "cerca" del DNI del SOLICITANTE para evitar el correo de "MITJÀ PREFERENT..."
 # Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
 
 from flask import Flask, request, render_template_string, send_file
@@ -19,20 +20,15 @@ ULTIMO_ARCHIVO = None
 # ===============================
 DEFAULT_PERFIL = {
     "dni": "50753101J",
-    # Pon aquí tu email (o en perfil.json):
-    "email": "TU_EMAIL_AQUI@DOMINIO.COM",
+    "email": "tuemailreal@dominio.com"
 }
 
 def load_perfil():
-    """
-    Carga perfil.json si existe. Si no existe o falla, usa DEFAULT_PERFIL.
-    """
     if os.path.exists("perfil.json"):
         try:
             with open("perfil.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                # Fusiona con defaults para no perder claves
                 merged = dict(DEFAULT_PERFIL)
                 merged.update(data)
                 return merged
@@ -42,7 +38,7 @@ def load_perfil():
 
 PERFIL = load_perfil()
 
-def get_profile_value(key: str) -> str:
+def get_profile_value(key):
     v = PERFIL.get(key, "")
     if v is None:
         v = ""
@@ -54,9 +50,9 @@ def get_profile_value(key: str) -> str:
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.2</title>
+<title>Compañero V4.1.4</title>
 
-<h2>Compañero — Motor de campos V4.1.2 (Andratx)</h2>
+<h2>Compañero — Motor de campos V4.1.4 (Andratx)</h2>
 
 <p style="margin-top:-8px; color:#555;">
   Debug: añade <b>?debug=1</b> a la URL para ver cajas (rojo=label, azul=casilla).
@@ -80,12 +76,12 @@ HTML = """
 """
 
 # ===============================
-# HELPERS (texto / geometría)
+# HELPERS
 # ===============================
 
-def find_label_rect(page: fitz.Page, variantes: list) -> fitz.Rect | None:
+def find_all_label_rects(page, variants):
     found = []
-    for v in variantes:
+    for v in variants:
         if not v:
             continue
         try:
@@ -94,14 +90,14 @@ def find_label_rect(page: fitz.Page, variantes: list) -> fitz.Rect | None:
                 found.extend(rects)
         except Exception:
             pass
-
-    if not found:
-        return None
-
     found.sort(key=lambda r: (r.y0, r.x0))
-    return found[0]
+    return found
 
-def iter_rectangles_from_drawings(page: fitz.Page):
+def find_first_label_rect(page, variants):
+    all_rects = find_all_label_rects(page, variants)
+    return all_rects[0] if all_rects else None
+
+def iter_rectangles_from_drawings(page):
     try:
         drawings = page.get_drawings()
     except Exception:
@@ -115,31 +111,25 @@ def iter_rectangles_from_drawings(page: fitz.Page):
                 except Exception:
                     pass
 
-def x_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
+def x_overlap(a, b):
     x0 = max(a.x0, b.x0)
     x1 = min(a.x1, b.x1)
     ov = x1 - x0
     return ov if ov > 0 else 0.0
 
-def y_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
+def y_overlap(a, b):
     y0 = max(a.y0, b.y0)
     y1 = min(a.y1, b.y1)
     ov = y1 - y0
     return ov if ov > 0 else 0.0
 
-def text_width(text: str, fontsize: float) -> float:
+def text_width(text, fontsize):
     try:
         return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
     except Exception:
         return len(text) * fontsize * 0.55
 
-def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect) -> fitz.Rect | None:
-    """
-    Selecciona la casilla asociada a un label.
-    Prioridad:
-      1) rectángulo debajo (misma columna)
-      2) rectángulo a la derecha (misma línea)
-    """
+def pick_box_rect_generic(page, label_rect):
     MIN_W, MAX_W = 35, 260
     MIN_H, MAX_H = 10, 55
 
@@ -157,29 +147,26 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect) -> fitz.Rect |
 
         is_box_sized = (MIN_W <= r.width <= MAX_W and MIN_H <= r.height <= MAX_H)
 
-        # PRIORIDAD: DEBAJO
+        # Debajo
         if r.y0 >= (label_rect.y1 - 1):
             dy = r.y0 - label_rect.y1
             if 0 <= dy <= BELOW_MAX_DY:
                 ovx = x_overlap(r, label_rect)
                 r_cx = (r.x0 + r.x1) / 2.0
                 col_ok = (label_rect.x0 - 12) <= r_cx <= (label_rect.x1 + 12)
-
                 if ovx >= (label_rect.width * 0.30) or col_ok:
                     width_penalty = max(0.0, (r.width - MAX_W)) * 2.0
                     size_bonus = -60.0 if is_box_sized else 0.0
                     score = (dy + width_penalty, size_bonus, r.width, r.x0)
                     below.append((score, r))
 
-        # FALLBACK: DERECHA
+        # Derecha
         if r.x0 >= (label_rect.x1 - 2):
             ovy = y_overlap(r, label_rect)
             close_y = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0)) <= RIGHT_MAX_DY
-
-            if ovy >= 2 or close_y:
+            if (ovy >= 2) or close_y:
                 if not is_box_sized:
                     continue
-
                 dx = r.x0 - label_rect.x1
                 dyc = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0))
                 score = (max(0.0, dx), dyc, r.width, r.x0)
@@ -188,18 +175,12 @@ def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect) -> fitz.Rect |
     if below:
         below.sort(key=lambda t: t[0])
         return below[0][1]
-
     if right:
         right.sort(key=lambda t: t[0])
         return right[0][1]
-
     return None
 
-def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
-    """
-    Escribe centrado dentro de 'box' con padding interno.
-    Devuelve fontsize final.
-    """
+def write_text_centered(page, box, text):
     text = (text or "").strip()
     if not text:
         return 0.0
@@ -207,12 +188,7 @@ def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
     pad_x = max(1.0, box.width * 0.06)
     pad_y = max(0.8, box.height * 0.18)
 
-    inner = fitz.Rect(
-        box.x0 + pad_x,
-        box.y0 + pad_y,
-        box.x1 - pad_x,
-        box.y1 - pad_y
-    )
+    inner = fitz.Rect(box.x0 + pad_x, box.y0 + pad_y, box.x1 - pad_x, box.y1 - pad_y)
 
     fontsize = max(6.0, min(12.5, inner.height * 0.78))
 
@@ -232,34 +208,63 @@ def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
     y_center = (inner.y0 + inner.y1) / 2.0
     y = y_center + (fontsize * 0.33)
 
-    page.insert_text(
-        (x, y),
-        text,
-        fontsize=fontsize,
-        fontname="helv",
-        color=(0, 0, 0),
-        overlay=True
-    )
+    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", color=(0, 0, 0), overlay=True)
     return fontsize
 
-def fill_field(page: fitz.Page, field_name: str, variantes_label: list, value: str, debug: bool, log: list) -> bool:
+def pick_email_label_near_dni(page, email_labels, dni_label_rect):
+    """
+    Selecciona el label de Email "del solicitante" buscando el que esté:
+    - cerca en Y del DNI del solicitante (misma banda/tabla)
+    - y a la derecha del DNI (normal en Andratx)
+    """
+    candidates = find_all_label_rects(page, email_labels)
+    if not candidates:
+        return None
+
+    # Si no tenemos DNI anchor, fallback al primero (arriba/izq)
+    if not dni_label_rect:
+        return candidates[0]
+
+    dni_cy = (dni_label_rect.y0 + dni_label_rect.y1) / 2.0
+
+    scored = []
+    for r in candidates:
+        r_cy = (r.y0 + r.y1) / 2.0
+        dy = abs(r_cy - dni_cy)
+
+        # Preferimos que esté en la misma fila (dy pequeño) y a la derecha del DNI
+        right_bonus = 0.0
+        if r.x0 >= (dni_label_rect.x1 - 5):
+            right_bonus = -50.0
+
+        # Penaliza si está muy lejos en Y (probable "MITJÀ PREFERENT...")
+        far_penalty = 0.0
+        if dy > 80:
+            far_penalty = dy * 3.0
+
+        score = (dy + far_penalty + right_bonus, r.y0, r.x0)
+        scored.append((score, r))
+
+    scored.sort(key=lambda t: t[0])
+    return scored[0][1]
+
+def fill_field_with_label(page, field_name, label_rect, value, debug, log):
     value = (value or "").strip()
-    if not value or ("TU_EMAIL_AQUI" in value):
-        log.append(f"[{field_name}] saltado (sin valor en perfil).")
+    if not value:
+        log.append(f"[{field_name}] saltado (sin valor).")
         return False
 
-    label = find_label_rect(page, variantes_label)
-    if not label:
+    if not label_rect:
         log.append(f"[{field_name}] NO encontrado label.")
         return False
 
-    box = pick_box_rect_generic(page, label)
+    box = pick_box_rect_generic(page, label_rect)
     if not box:
-        log.append(f"[{field_name}] NO encontrada casilla asociada.")
+        log.append(f"[{field_name}] NO encontrada casilla.")
         return False
 
     if debug:
-        page.draw_rect(label, color=(1, 0, 0), width=0.8)
+        page.draw_rect(label_rect, color=(1, 0, 0), width=0.8)
         page.draw_rect(box, color=(0, 0, 1), width=0.8)
 
     fs = write_text_centered(page, box, value)
@@ -267,25 +272,15 @@ def fill_field(page: fitz.Page, field_name: str, variantes_label: list, value: s
     return True
 
 # ===============================
-# CAMPOS (DNI + Email)
+# LABELS
 # ===============================
-FIELD_SPECS = [
-    {
-        "name": "DNI",
-        "key": "dni",
-        "labels": ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"],
-    },
-    {
-        "name": "Email",
-        "key": "email",
-        "labels": [
-            "Adreça de correu electrònic",
-            "Dirección de correo electrónico",
-            "Correo electrónico",
-            "Email",
-            "E-mail",
-        ],
-    },
+DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
+EMAIL_LABELS = [
+    "Adreça de correu electrònic",
+    "Dirección de correo electrónico",
+    "Correo electrónico",
+    "Email",
+    "E-mail",
 ]
 
 # ===============================
@@ -298,7 +293,6 @@ def index():
 
     info_lines = []
     download = False
-
     debug = request.args.get("debug", "").strip().lower() in ("1", "true", "yes", "si", "sí")
 
     if request.method == "POST":
@@ -310,29 +304,40 @@ def index():
         out_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
         f.save(in_path)
 
-        try:
-            doc = fitz.open(in_path)
-            page = doc[0]
+        doc = fitz.open(in_path)
+        page = doc[0]
 
-            for spec in FIELD_SPECS:
-                fill_field(
-                    page=page,
-                    field_name=spec["name"],
-                    variantes_label=spec["labels"],
-                    value=get_profile_value(spec["key"]),
-                    debug=debug,
-                    log=info_lines
-                )
+        # 1) Anchor DNI (solicitante): primer DNI-NIF de la página (arriba)
+        dni_label = find_first_label_rect(page, DNI_LABELS)
 
-            doc.save(out_path)
-            doc.close()
+        # 2) Email: escoger label cercano al DNI del solicitante (misma tabla)
+        email_label = pick_email_label_near_dni(page, EMAIL_LABELS, dni_label)
 
-            ULTIMO_ARCHIVO = out_path
-            download = True
+        # Rellenar DNI
+        fill_field_with_label(
+            page=page,
+            field_name="DNI",
+            label_rect=dni_label,
+            value=get_profile_value("dni"),
+            debug=debug,
+            log=info_lines
+        )
 
-        except Exception as e:
-            info_lines.append("ERROR: " + str(e))
-            download = False
+        # Rellenar Email
+        fill_field_with_label(
+            page=page,
+            field_name="Email",
+            label_rect=email_label,
+            value=get_profile_value("email"),
+            debug=debug,
+            log=info_lines
+        )
+
+        doc.save(out_path)
+        doc.close()
+
+        ULTIMO_ARCHIVO = out_path
+        download = True
 
     return render_template_string(
         HTML,
