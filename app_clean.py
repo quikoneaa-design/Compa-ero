@@ -1,7 +1,8 @@
-# app_clean.py — Compañero V3.6B Diagnóstico geométrico robusto
+# app_clean.py — Compañero V3.7 DNI dentro de la casilla (Andratx) por geometría
 
 from flask import Flask, request, render_template_string, send_file
 import os
+import json
 import fitz
 
 app = Flask(__name__)
@@ -11,17 +12,36 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ULTIMO_ARCHIVO = None
 
+# ===============================
+# PERFIL
+# ===============================
+DEFAULT_PERFIL = {"dni": "50753101J"}
+
+try:
+    if os.path.exists("perfil.json"):
+        with open("perfil.json", "r", encoding="utf-8") as f:
+            PERFIL = json.load(f)
+    else:
+        PERFIL = DEFAULT_PERFIL
+except Exception:
+    PERFIL = DEFAULT_PERFIL
+
+DNI_USUARIO = (PERFIL.get("dni") or "").strip()
+
+# ===============================
+# HTML
+# ===============================
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V3.6B Diagnóstico</title>
+<title>Compañero V3.7</title>
 
-<h2>Diagnóstico Rectángulos DNI (Robusto)</h2>
+<h2>Compañero — DNI automático en casilla</h2>
 
 <form method="post" enctype="multipart/form-data">
     <input type="file" name="pdf" accept="application/pdf" required>
     <br><br>
-    <button type="submit">Analizar PDF</button>
+    <button type="submit">Procesar PDF</button>
 </form>
 
 {% if info %}
@@ -31,83 +51,35 @@ HTML = """
 
 {% if download %}
 <br>
-<a href="/download">Descargar PDF Analizado</a>
+<a href="/download">Descargar PDF</a>
 {% endif %}
 """
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    global ULTIMO_ARCHIVO
+# ===============================
+# HELPERS
+# ===============================
 
-    if request.method == "GET":
-        return render_template_string(HTML)
-
-    file = request.files.get("pdf")
-    if not file:
-        return render_template_string(HTML, info="No PDF.", download=False)
-
-    input_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
-    output_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
-    file.save(input_path)
-
-    doc = fitz.open(input_path)
-    page = doc[0]
-
-    # 1️⃣ Buscar label DNI
+def find_label_rect(page: fitz.Page) -> fitz.Rect | None:
     rects = (
         page.search_for("DNI-NIF") or
         page.search_for("DNI o NIF") or
         page.search_for("DNI/NIF") or
         page.search_for("DNI")
     )
+    if not rects:
+        return None
+    return rects[0]
 
-    if rects:
-        label_rect = rects[0]
-        page.draw_rect(label_rect, color=(1, 0, 0), width=2)
-    else:
-        label_rect = None
-
-    # 2️⃣ Detectar rectángulos reales en dibujos
+def iter_rectangles_from_drawings(page: fitz.Page):
     drawings = page.get_drawings()
-    contador = 0
-
     for d in drawings:
-        for item in d["items"]:
-            if item[0] == "re":  # "re" significa rectangle
-                rect = fitz.Rect(item[1])
+        items = d.get("items", [])
+        for it in items:
+            # it[0] == "re" -> rectangle
+            if it and it[0] == "re" and len(it) > 1:
+                try:
+                    yield fitz.Rect(it[1])
+                except Exception:
+                    continue
 
-                # Dibujar rectángulo detectado
-                page.draw_rect(rect, color=(0, 0, 1), width=1)
-
-                # Numerarlo
-                page.insert_text(
-                    (rect.x0, rect.y0 - 2),
-                    str(contador),
-                    fontsize=8,
-                    overlay=True
-                )
-
-                contador += 1
-
-    doc.save(output_path)
-    doc.close()
-
-    ULTIMO_ARCHIVO = output_path
-
-    return render_template_string(
-        HTML,
-        info=f"Rectángulos detectados: {contador}",
-        download=True
-    )
-
-
-@app.route("/download")
-def download():
-    global ULTIMO_ARCHIVO
-    if not ULTIMO_ARCHIVO:
-        return "Nada para descargar."
-    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+def pick_dni_box_rect(page: fitz.Page, label_rect: fitz
