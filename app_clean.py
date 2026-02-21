@@ -1,12 +1,14 @@
-# app_clean.py — Compañero V4.1.4 (Andratx) — Motor GENÉRICO (DNI + Email) con anclaje lógico
-# ✅ CÓDIGO COMPLETO
-# Email se elige "cerca" del DNI del SOLICITANTE para evitar el correo de "MITJÀ PREFERENT..."
-# Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
+# app_clean.py — Compañero V4.1.9 (Andratx)
+# Bloque SOLICITANTE: Nombre (casilla grande encima) + DNI + Email + Teléfono
+# ✅ Nombre anclado geométricamente: el label de "Nombre/Nom" MÁS CERCANO POR ENCIMA del DNI del solicitante
+# ✅ Email: misma fila que DNI y a la derecha
+# ✅ Teléfono: misma fila que DNI y a la derecha del Email
+# Debug: añade ?debug=1 a la URL (rojo=label, azul=casilla)
 
 from flask import Flask, request, render_template_string, send_file
 import os
 import json
-import fitz  # PyMuPDF
+import fitz
 
 app = Flask(__name__)
 
@@ -19,8 +21,10 @@ ULTIMO_ARCHIVO = None
 # PERFIL
 # ===============================
 DEFAULT_PERFIL = {
+    "nombre": "Enrique Afonso Álvarez",
     "dni": "50753101J",
-    "email": "tuemailreal@dominio.com"
+    "email": "tuemailreal@dominio.com",
+    "telefono": "600000000",
 }
 
 def load_perfil():
@@ -50,13 +54,10 @@ def get_profile_value(key):
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.4</title>
+<title>Compañero V4.1.9</title>
 
-<h2>Compañero — Motor de campos V4.1.4 (Andratx)</h2>
-
-<p style="margin-top:-8px; color:#555;">
-  Debug: añade <b>?debug=1</b> a la URL para ver cajas (rojo=label, azul=casilla).
-</p>
+<h2>Compañero — Bloque Solicitante (Nombre + DNI + Email + Teléfono)</h2>
+<p>Debug: añade <b>?debug=1</b> a la URL</p>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -79,30 +80,32 @@ HTML = """
 # HELPERS
 # ===============================
 
-def find_all_label_rects(page, variants):
-    found = []
-    for v in variants:
-        if not v:
+def find_all_label_rects(page, labels):
+    rects = []
+    for label in labels:
+        if not label:
             continue
         try:
-            rects = page.search_for(v)
-            if rects:
-                found.extend(rects)
+            found = page.search_for(label)
+            if found:
+                rects.extend(found)
         except Exception:
             pass
-    found.sort(key=lambda r: (r.y0, r.x0))
-    return found
+    rects.sort(key=lambda r: (r.y0, r.x0))
+    return rects
 
-def find_first_label_rect(page, variants):
-    all_rects = find_all_label_rects(page, variants)
-    return all_rects[0] if all_rects else None
+def first_rect(page, labels):
+    r = find_all_label_rects(page, labels)
+    return r[0] if r else None
 
-def iter_rectangles_from_drawings(page):
+def same_row(a, b, tol=25):
+    return abs(((a.y0 + a.y1) / 2.0) - ((b.y0 + b.y1) / 2.0)) <= tol
+
+def iter_rectangles(page):
     try:
         drawings = page.get_drawings()
     except Exception:
         drawings = []
-
     for d in drawings:
         for it in d.get("items", []):
             if it and len(it) > 1 and it[0] == "re":
@@ -111,189 +114,118 @@ def iter_rectangles_from_drawings(page):
                 except Exception:
                     pass
 
-def x_overlap(a, b):
-    x0 = max(a.x0, b.x0)
-    x1 = min(a.x1, b.x1)
-    ov = x1 - x0
-    return ov if ov > 0 else 0.0
+def pick_box(page, label_rect):
+    candidates = []
+    for r in iter_rectangles(page):
+        # derecha (misma fila)
+        if r.x0 >= label_rect.x1 - 2 and same_row(r, label_rect, 30):
+            candidates.append(r)
+        # debajo
+        if r.y0 >= label_rect.y1 - 1:
+            candidates.append(r)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: (abs(r.y0 - label_rect.y0), r.x0))
+    return candidates[0]
 
-def y_overlap(a, b):
-    y0 = max(a.y0, b.y0)
-    y1 = min(a.y1, b.y1)
-    ov = y1 - y0
-    return ov if ov > 0 else 0.0
-
-def text_width(text, fontsize):
-    try:
-        return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
-    except Exception:
-        return len(text) * fontsize * 0.55
-
-def pick_box_rect_generic(page, label_rect):
-    MIN_W, MAX_W = 35, 260
-    MIN_H, MAX_H = 10, 55
-
-    BELOW_MAX_DY = 140
-    RIGHT_MAX_DY = 45
-
-    below = []
-    right = []
-
-    for r in iter_rectangles_from_drawings(page):
-        if r.width < 25 or r.width > 600:
-            continue
-        if r.height < 6 or r.height > 200:
-            continue
-
-        is_box_sized = (MIN_W <= r.width <= MAX_W and MIN_H <= r.height <= MAX_H)
-
-        # Debajo
-        if r.y0 >= (label_rect.y1 - 1):
-            dy = r.y0 - label_rect.y1
-            if 0 <= dy <= BELOW_MAX_DY:
-                ovx = x_overlap(r, label_rect)
-                r_cx = (r.x0 + r.x1) / 2.0
-                col_ok = (label_rect.x0 - 12) <= r_cx <= (label_rect.x1 + 12)
-                if ovx >= (label_rect.width * 0.30) or col_ok:
-                    width_penalty = max(0.0, (r.width - MAX_W)) * 2.0
-                    size_bonus = -60.0 if is_box_sized else 0.0
-                    score = (dy + width_penalty, size_bonus, r.width, r.x0)
-                    below.append((score, r))
-
-        # Derecha
-        if r.x0 >= (label_rect.x1 - 2):
-            ovy = y_overlap(r, label_rect)
-            close_y = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0)) <= RIGHT_MAX_DY
-            if (ovy >= 2) or close_y:
-                if not is_box_sized:
-                    continue
-                dx = r.x0 - label_rect.x1
-                dyc = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0))
-                score = (max(0.0, dx), dyc, r.width, r.x0)
-                right.append((score, r))
-
-    if below:
-        below.sort(key=lambda t: t[0])
-        return below[0][1]
-    if right:
-        right.sort(key=lambda t: t[0])
-        return right[0][1]
-    return None
-
-def write_text_centered(page, box, text):
+def write_centered(page, box, text):
     text = (text or "").strip()
     if not text:
         return 0.0
 
-    pad_x = max(1.0, box.width * 0.06)
-    pad_y = max(0.8, box.height * 0.18)
+    pad_x = box.width * 0.06
+    pad_y = box.height * 0.18
 
-    inner = fitz.Rect(box.x0 + pad_x, box.y0 + pad_y, box.x1 - pad_x, box.y1 - pad_y)
+    inner = fitz.Rect(
+        box.x0 + pad_x,
+        box.y0 + pad_y,
+        box.x1 - pad_x,
+        box.y1 - pad_y
+    )
 
-    fontsize = max(6.0, min(12.5, inner.height * 0.78))
+    fontsize = min(12.0, inner.height * 0.75)
+    if fontsize < 5.5:
+        fontsize = 5.5
 
     for _ in range(80):
-        tw = text_width(text, fontsize)
-        if tw <= inner.width:
+        if fitz.get_text_length(text, fontname="helv", fontsize=fontsize) <= inner.width:
             break
         fontsize -= 0.2
         if fontsize < 5.5:
+            fontsize = 5.5
             break
 
-    tw = text_width(text, fontsize)
+    tw = fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
     x = inner.x0 + (inner.width - tw) / 2.0
-    if x < inner.x0:
-        x = inner.x0
+    y = (inner.y0 + inner.y1) / 2.0 + fontsize * 0.33
 
-    y_center = (inner.y0 + inner.y1) / 2.0
-    y = y_center + (fontsize * 0.33)
-
-    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", color=(0, 0, 0), overlay=True)
+    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", overlay=True)
     return fontsize
 
-def pick_email_label_near_dni(page, email_labels, dni_label_rect):
+def pick_nombre_label_above_dni(page, nombre_labels, dni_label):
     """
-    Selecciona el label de Email "del solicitante" buscando el que esté:
-    - cerca en Y del DNI del solicitante (misma banda/tabla)
-    - y a la derecha del DNI (normal en Andratx)
+    Devuelve el label de nombre que esté:
+      - por encima del DNI (r.y1 <= dni.y0 + margen)
+      - lo más cercano verticalmente al DNI (mínimo gap)
+      - y preferiblemente alineado en X con la zona del DNI (no imprescindible)
     """
-    candidates = find_all_label_rects(page, email_labels)
-    if not candidates:
+    if not dni_label:
+        # sin ancla: devolvemos el primero arriba-izq
+        rects = find_all_label_rects(page, nombre_labels)
+        return rects[0] if rects else None
+
+    rects = find_all_label_rects(page, nombre_labels)
+    if not rects:
         return None
 
-    # Si no tenemos DNI anchor, fallback al primero (arriba/izq)
-    if not dni_label_rect:
-        return candidates[0]
-
-    dni_cy = (dni_label_rect.y0 + dni_label_rect.y1) / 2.0
-
     scored = []
-    for r in candidates:
-        r_cy = (r.y0 + r.y1) / 2.0
-        dy = abs(r_cy - dni_cy)
+    dni_y0 = dni_label.y0
+    dni_x0 = dni_label.x0
 
-        # Preferimos que esté en la misma fila (dy pequeño) y a la derecha del DNI
-        right_bonus = 0.0
-        if r.x0 >= (dni_label_rect.x1 - 5):
-            right_bonus = -50.0
+    for r in rects:
+        # queremos el label "por encima" del DNI
+        if r.y1 <= dni_y0 + 6:
+            gap = dni_y0 - r.y1  # cuanto sube
+            # pequeño bonus si está a la izquierda del DNI (suele ser la columna de labels)
+            x_bonus = 0.0
+            if r.x0 <= dni_x0 + 10:
+                x_bonus = -15.0
+            score = (gap + x_bonus, r.y0, r.x0)
+            scored.append((score, r))
 
-        # Penaliza si está muy lejos en Y (probable "MITJÀ PREFERENT...")
-        far_penalty = 0.0
-        if dy > 80:
-            far_penalty = dy * 3.0
-
-        score = (dy + far_penalty + right_bonus, r.y0, r.x0)
-        scored.append((score, r))
+    if not scored:
+        # fallback: el primero que haya (arriba)
+        return rects[0]
 
     scored.sort(key=lambda t: t[0])
     return scored[0][1]
 
-def fill_field_with_label(page, field_name, label_rect, value, debug, log):
-    value = (value or "").strip()
-    if not value:
-        log.append(f"[{field_name}] saltado (sin valor).")
-        return False
-
-    if not label_rect:
-        log.append(f"[{field_name}] NO encontrado label.")
-        return False
-
-    box = pick_box_rect_generic(page, label_rect)
-    if not box:
-        log.append(f"[{field_name}] NO encontrada casilla.")
-        return False
-
-    if debug:
-        page.draw_rect(label_rect, color=(1, 0, 0), width=0.8)
-        page.draw_rect(box, color=(0, 0, 1), width=0.8)
-
-    fs = write_text_centered(page, box, value)
-    log.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
-    return True
-
 # ===============================
 # LABELS
 # ===============================
-DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
-EMAIL_LABELS = [
-    "Adreça de correu electrònic",
-    "Dirección de correo electrónico",
-    "Correo electrónico",
-    "Email",
-    "E-mail",
+NAME_LABELS = [
+    "Nom de l'entitat o persona física",
+    "Nom de l'entitat",
+    "Nom de l’entitat o persona física",  # apóstrofo tipográfico por si acaso
+    "Nom de l’entitat",
+    "Nombre",
+    "Nom",
 ]
 
-# ===============================
-# ROUTES
-# ===============================
+DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
+EMAIL_LABELS = ["Adreça de correu electrònic", "Dirección de correo electrónico", "Correo electrónico", "Email", "E-mail"]
+TEL_LABELS = ["Telèfon", "Teléfono", "Tel.", "Telefono"]
 
+# ===============================
+# ROUTE
+# ===============================
 @app.route("/", methods=["GET", "POST"])
 def index():
     global ULTIMO_ARCHIVO
+    download = False
+    debug = request.args.get("debug", "") == "1"
 
     info_lines = []
-    download = False
-    debug = request.args.get("debug", "").strip().lower() in ("1", "true", "yes", "si", "sí")
 
     if request.method == "POST":
         f = request.files.get("pdf")
@@ -307,31 +239,55 @@ def index():
         doc = fitz.open(in_path)
         page = doc[0]
 
-        # 1) Anchor DNI (solicitante): primer DNI-NIF de la página (arriba)
-        dni_label = find_first_label_rect(page, DNI_LABELS)
+        # 1) DNI (ancla solicitante): primer DNI arriba en la página
+        dni_label = first_rect(page, DNI_LABELS)
+        if not dni_label:
+            doc.save(out_path)
+            doc.close()
+            ULTIMO_ARCHIVO = out_path
+            return render_template_string(HTML, info="No encuentro label DNI.", download=True)
 
-        # 2) Email: escoger label cercano al DNI del solicitante (misma tabla)
-        email_label = pick_email_label_near_dni(page, EMAIL_LABELS, dni_label)
+        # 2) Nombre: label más cercano por encima del DNI
+        name_label = pick_nombre_label_above_dni(page, NAME_LABELS, dni_label)
 
-        # Rellenar DNI
-        fill_field_with_label(
-            page=page,
-            field_name="DNI",
-            label_rect=dni_label,
-            value=get_profile_value("dni"),
-            debug=debug,
-            log=info_lines
-        )
+        # 3) Email: misma fila que DNI, a la derecha
+        email_label = None
+        for e in find_all_label_rects(page, EMAIL_LABELS):
+            if same_row(e, dni_label, 28) and e.x0 > dni_label.x0:
+                email_label = e
+                break
 
-        # Rellenar Email
-        fill_field_with_label(
-            page=page,
-            field_name="Email",
-            label_rect=email_label,
-            value=get_profile_value("email"),
-            debug=debug,
-            log=info_lines
-        )
+        # 4) Teléfono: misma fila que DNI, a la derecha del Email
+        tel_label = None
+        if email_label:
+            for t in find_all_label_rects(page, TEL_LABELS):
+                if same_row(t, dni_label, 28) and t.x0 > email_label.x0:
+                    tel_label = t
+                    break
+
+        # Rellenar en orden
+        fields = [
+            ("Nombre", name_label, get_profile_value("nombre")),
+            ("DNI", dni_label, get_profile_value("dni")),
+            ("Email", email_label, get_profile_value("email")),
+            ("Teléfono", tel_label, get_profile_value("telefono")),
+        ]
+
+        for fname, label, value in fields:
+            if not label:
+                info_lines.append(f"[{fname}] label no encontrado.")
+                continue
+            box = pick_box(page, label)
+            if not box:
+                info_lines.append(f"[{fname}] casilla no encontrada.")
+                continue
+
+            if debug:
+                page.draw_rect(label, color=(1, 0, 0), width=0.8)
+                page.draw_rect(box, color=(0, 0, 1), width=0.8)
+
+            fs = write_centered(page, box, value)
+            info_lines.append(f"[{fname}] OK (fontsize={fs:.1f}).")
 
         doc.save(out_path)
         doc.close()
@@ -339,15 +295,10 @@ def index():
         ULTIMO_ARCHIVO = out_path
         download = True
 
-    return render_template_string(
-        HTML,
-        info="\n".join(info_lines) if info_lines else None,
-        download=download
-    )
+    return render_template_string(HTML, info="\n".join(info_lines) if info_lines else None, download=download)
 
 @app.route("/download")
 def download_file():
-    global ULTIMO_ARCHIVO
     if not ULTIMO_ARCHIVO:
         return "No hay archivo.", 404
     return send_file(ULTIMO_ARCHIVO, as_attachment=True)
