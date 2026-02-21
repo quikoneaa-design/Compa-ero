@@ -1,4 +1,5 @@
-# app_clean.py — Compañero V3.7b (SAFE) — DNI en casilla por geometría
+# app_clean.py — Compañero V3.7e (SAFE) — PyMuPDF compatible (sin TEXT_ALIGN_MIDDLE)
+# Objetivo: detectar el primer "DNI-NIF" (solicitante) y escribir el DNI dentro de su casilla por geometría.
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -34,7 +35,7 @@ DNI_USUARIO = (PERFIL.get("dni") or "").strip() or "50753101J"
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V3.7b</title>
+<title>Compañero V3.7e</title>
 
 <h2>Compañero — DNI automático en casilla (SAFE)</h2>
 
@@ -114,17 +115,17 @@ def pick_dni_box_rect(page, label_rect):
     candidates = []
 
     for r in iter_rectangles_from_drawings(page):
-        # Filtros tamaño razonable para casilla de DNI
+        # tamaño razonable de casilla
         if r.width < 35 or r.height < 8:
             continue
         if r.width > 450 or r.height > 80:
             continue
 
-        # A la derecha del label
+        # a la derecha del label
         if r.x0 < (label_rect.x1 - 5):
             continue
 
-        # Debe estar en la misma "línea" (cercano en Y)
+        # misma banda vertical
         ov = y_overlap(r, label_rect)
         close_y = (abs(r.y0 - label_rect.y0) <= 25) or (abs(r.y1 - label_rect.y1) <= 25)
         if ov < 2 and not close_y:
@@ -144,6 +145,7 @@ def pick_dni_box_rect(page, label_rect):
 
 
 def write_centered_in_box(page, box, text):
+    # margen interior (evita tocar bordes)
     pad_x = max(1.5, box.width * 0.03)
     pad_y = max(1.0, box.height * 0.12)
 
@@ -154,19 +156,20 @@ def write_centered_in_box(page, box, text):
         box.y1 - pad_y
     )
 
+    # tamaño de fuente basado en altura útil
     fontsize = max(6.0, min(14.0, inner.height * 0.85))
 
+    # PyMuPDF antiguo: NO existe TEXT_ALIGN_MIDDLE. Usamos align numérico.
+    # align=1 => center horizontal
     rc = page.insert_textbox(
         inner,
         text,
         fontsize=fontsize,
         fontname="helv",
-        align=fitz.TEXT_ALIGN_CENTER,
-        valign=fitz.TEXT_ALIGN_MIDDLE,
+        align=1,
         color=(0, 0, 0),
         overlay=True
     )
-
     return rc, fontsize
 
 
@@ -208,9 +211,8 @@ def index():
             info_lines.append("Label: " + str(tuple(round(v, 2) for v in label)))
 
             box = pick_dni_box_rect(page, label)
-
             if not box:
-                # fallback: caja aproximada a la derecha
+                # fallback aproximado a la derecha del label
                 h = max(12.0, (label.y1 - label.y0) * 1.6)
                 y0 = label.y0 - (h - (label.y1 - label.y0)) * 0.35
                 y1 = y0 + h
@@ -221,10 +223,10 @@ def index():
             else:
                 info_lines.append("Box: " + str(tuple(round(v, 2) for v in box)))
 
-            # Debug visual (rojo label / azul box)
+            # debug visual
             try:
-                page.draw_rect(label, color=(1, 0, 0), width=0.8)
-                page.draw_rect(box, color=(0, 0, 1), width=0.8)
+                page.draw_rect(label, color=(1, 0, 0), width=0.8)  # rojo label
+                page.draw_rect(box, color=(0, 0, 1), width=0.8)    # azul box
             except Exception:
                 pass
 
@@ -241,7 +243,11 @@ def index():
             info_lines.append("ERROR: " + repr(e))
             download = False
 
-    return render_template_string(HTML, info="\n".join(info_lines) if info_lines else None, download=download)
+    return render_template_string(
+        HTML,
+        info="\n".join(info_lines) if info_lines else None,
+        download=download
+    )
 
 
 @app.route("/download")
