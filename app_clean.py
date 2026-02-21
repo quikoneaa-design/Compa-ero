@@ -1,5 +1,6 @@
-# app_clean.py — Compañero V4.0 (Andratx) — DNI en la casilla CORRECTA (debajo del label)
-# Prioriza casilla debajo del label + tamaño típico DNI.
+# app_clean.py — Compañero V4.1 (Andratx) — Motor GENÉRICO de campos (híbrido limpio)
+# Patrón: label -> casilla (debajo, fallback derecha) -> escribir centrado
+# Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -16,7 +17,13 @@ ULTIMO_ARCHIVO = None
 # ===============================
 # PERFIL
 # ===============================
-DEFAULT_PERFIL = {"dni": "50753101J"}
+DEFAULT_PERFIL = {
+    "dni": "50753101J",
+    # Puedes ir añadiendo:
+    # "email": "tu@email.com",
+    # "telefono": "600000000",
+    # "nombre_entidad": "Enrique Afonso Álvarez",
+}
 
 try:
     if os.path.exists("perfil.json"):
@@ -27,7 +34,9 @@ try:
 except Exception:
     PERFIL = DEFAULT_PERFIL
 
-DNI_USUARIO = (PERFIL.get("dni") or "").strip() or "50753101J"
+def _get_profile_value(key: str) -> str:
+    v = (PERFIL.get(key) or "").strip()
+    return v
 
 # ===============================
 # HTML
@@ -35,9 +44,13 @@ DNI_USUARIO = (PERFIL.get("dni") or "").strip() or "50753101J"
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.0</title>
+<title>Compañero V4.1</title>
 
-<h2>Compañero — DNI automático en casilla (Andratx V4.0)</h2>
+<h2>Compañero — Motor de campos V4.1 (Andratx)</h2>
+
+<p style="margin-top:-8px; color:#555;">
+  Debug: añade <b>?debug=1</b> a la URL para ver cajas (rojo=label, azul=casilla).
+</p>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -57,115 +70,117 @@ HTML = """
 """
 
 # ===============================
-# HELPERS
+# HELPERS (texto / geometría)
 # ===============================
 
-def find_label_rect(page):
-    variantes = [
-        "DNI-NIF",
-        "DNI - NIF",
-        "DNI/NIF",
-        "DNI o NIF",
-        "DNI",
-    ]
+def find_label_rect(page: fitz.Page, variantes: list[str]):
     found = []
     for v in variantes:
+        if not v:
+            continue
         try:
             rects = page.search_for(v)
             if rects:
                 found.extend(rects)
-        except:
+        except Exception:
             pass
 
     if not found:
         return None
 
+    # Primera aparición (arriba/izquierda)
     found.sort(key=lambda r: (r.y0, r.x0))
     return found[0]
 
 
-def iter_rectangles_from_drawings(page):
+def iter_rectangles_from_drawings(page: fitz.Page):
     try:
         drawings = page.get_drawings()
-    except:
+    except Exception:
         drawings = []
 
     for d in drawings:
         for it in d.get("items", []):
+            # item: ("re", rect, ...)
             if it and len(it) > 1 and it[0] == "re":
                 try:
                     yield fitz.Rect(it[1])
-                except:
+                except Exception:
                     pass
 
 
-def x_overlap(a, b):
+def x_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
     x0 = max(a.x0, b.x0)
     x1 = min(a.x1, b.x1)
     ov = x1 - x0
     return ov if ov > 0 else 0.0
 
 
-def y_overlap(a, b):
+def y_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
     y0 = max(a.y0, b.y0)
     y1 = min(a.y1, b.y1)
     ov = y1 - y0
     return ov if ov > 0 else 0.0
 
 
-def _text_width(text, fontsize):
+def _text_width(text: str, fontsize: float) -> float:
     try:
         return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
-    except:
+    except Exception:
         return len(text) * fontsize * 0.55
 
 
-def pick_dni_box_rect(page, label_rect):
-
+def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect):
+    """
+    Selecciona la casilla asociada a un label.
+    Prioridad:
+      1) rectángulo debajo (misma columna)
+      2) rectángulo a la derecha (misma línea)
+    """
+    # Heurísticas "tipo casilla"
     MIN_W = 35
-    MAX_W = 240
+    MAX_W = 260
     MIN_H = 10
-    MAX_H = 45
+    MAX_H = 55
 
-    BELOW_MAX_DY = 120
-    RIGHT_MAX_DY = 40
+    BELOW_MAX_DY = 140
+    RIGHT_MAX_DY = 45
 
     below = []
     right = []
 
     for r in iter_rectangles_from_drawings(page):
 
-        if r.width < MIN_W or r.width > 520:
+        # descartar basura extrema
+        if r.width < 25 or r.width > 600:
             continue
-        if r.height < 8 or r.height > 140:
+        if r.height < 6 or r.height > 200:
             continue
 
-        is_dni_sized = (MIN_W <= r.width <= MAX_W and MIN_H <= r.height <= MAX_H)
+        is_box_sized = (MIN_W <= r.width <= MAX_W and MIN_H <= r.height <= MAX_H)
 
-        # ----- PRIORIDAD: DEBAJO -----
+        # ---- PRIORIDAD: DEBAJO ----
         if r.y0 >= (label_rect.y1 - 1):
             dy = r.y0 - label_rect.y1
             if 0 <= dy <= BELOW_MAX_DY:
 
                 ovx = x_overlap(r, label_rect)
                 r_cx = (r.x0 + r.x1) / 2.0
-                col_ok = (label_rect.x0 - 10) <= r_cx <= (label_rect.x1 + 10)
+                col_ok = (label_rect.x0 - 12) <= r_cx <= (label_rect.x1 + 12)
 
                 if ovx >= (label_rect.width * 0.30) or col_ok:
-
                     width_penalty = max(0.0, (r.width - MAX_W)) * 2.0
-                    size_bonus = -50.0 if is_dni_sized else 0.0
+                    size_bonus = -60.0 if is_box_sized else 0.0
                     score = (dy + width_penalty, size_bonus, r.width, r.x0)
                     below.append((score, r))
 
-        # ----- FALLBACK: DERECHA -----
+        # ---- FALLBACK: DERECHA ----
         if r.x0 >= (label_rect.x1 - 2):
-
             ovy = y_overlap(r, label_rect)
             close_y = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0)) <= RIGHT_MAX_DY
 
             if ovy >= 2 or close_y:
-                if not is_dni_sized:
+                if not is_box_sized:
                     continue
 
                 dx = r.x0 - label_rect.x1
@@ -184,7 +199,14 @@ def pick_dni_box_rect(page, label_rect):
     return None
 
 
-def write_dni_forced(page, box, text):
+def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
+    """
+    Escribe centrado dentro de 'box' con padding interno.
+    Devuelve fontsize final.
+    """
+    text = (text or "").strip()
+    if not text:
+        return 0.0
 
     pad_x = max(1.0, box.width * 0.06)
     pad_y = max(0.8, box.height * 0.18)
@@ -198,7 +220,7 @@ def write_dni_forced(page, box, text):
 
     fontsize = max(6.0, min(12.5, inner.height * 0.78))
 
-    for _ in range(60):
+    for _ in range(80):
         tw = _text_width(text, fontsize)
         if tw <= inner.width:
             break
@@ -222,9 +244,78 @@ def write_dni_forced(page, box, text):
         color=(0, 0, 0),
         overlay=True
     )
-
     return fontsize
 
+
+def fill_field(page: fitz.Page, field_name: str, variantes_label: list[str], value: str, debug: bool, log: list[str]):
+    """
+    Rellena un campo usando label->casilla.
+    """
+    value = (value or "").strip()
+    if not value:
+        log.append(f"[{field_name}] saltado (sin valor en perfil).")
+        return False
+
+    label = find_label_rect(page, variantes_label)
+    if not label:
+        log.append(f"[{field_name}] NO encontrado label.")
+        return False
+
+    box = pick_box_rect_generic(page, label)
+    if not box:
+        log.append(f"[{field_name}] NO encontrada casilla asociada.")
+        return False
+
+    if debug:
+        page.draw_rect(label, color=(1, 0, 0), width=0.8)  # rojo label
+        page.draw_rect(box, color=(0, 0, 1), width=0.8)    # azul casilla
+
+    fs = write_text_centered(page, box, value)
+    log.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
+    return True
+
+
+# ===============================
+# CAMPOS (pilotos)
+# ===============================
+FIELD_SPECS = [
+    {
+        "name": "DNI",
+        "key": "dni",
+        "labels": ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"],
+    },
+    {
+        "name": "Email",
+        "key": "email",
+        "labels": [
+            "Adreça de correu electrònic",
+            "Dirección de correo electrónico",
+            "Correo electrónico",
+            "Email",
+            "E-mail",
+        ],
+    },
+    {
+        "name": "Teléfono",
+        "key": "telefono",
+        "labels": [
+            "Telèfon",
+            "Teléfono",
+            "Tel.",
+            "Telf",
+        ],
+    },
+    {
+        "name": "Nombre entidad/persona",
+        "key": "nombre_entidad",
+        "labels": [
+            "Nom de l'entitat o persona física",
+            "Nombre de la entidad o persona física",
+            "Nom de l'entitat",
+            "Nombre de la entidad",
+        ],
+    },
+]
 
 # ===============================
 # ROUTES
@@ -237,8 +328,9 @@ def index():
     info_lines = []
     download = False
 
-    if request.method == "POST":
+    debug = request.args.get("debug", "").strip() in ("1", "true", "yes", "si", "sí")
 
+    if request.method == "POST":
         f = request.files.get("pdf")
         if not f or not f.filename.lower().endswith(".pdf"):
             return render_template_string(HTML, info="Sube un PDF válido.", download=False)
@@ -251,51 +343,4 @@ def index():
             doc = fitz.open(in_path)
             page = doc[0]
 
-            label = find_label_rect(page)
-            if not label:
-                info_lines.append("No encuentro el label DNI.")
-                doc.save(out_path)
-                doc.close()
-                ULTIMO_ARCHIVO = out_path
-                return render_template_string(HTML, info="\n".join(info_lines), download=True)
-
-            box = pick_dni_box_rect(page, label)
-            if not box:
-                info_lines.append("No encuentro casilla DNI.")
-                doc.save(out_path)
-                doc.close()
-                ULTIMO_ARCHIVO = out_path
-                return render_template_string(HTML, info="\n".join(info_lines), download=True)
-
-            page.draw_rect(label, color=(1, 0, 0), width=0.8)
-            page.draw_rect(box, color=(0, 0, 1), width=0.8)
-
-            write_dni_forced(page, box, DNI_USUARIO)
-
-            doc.save(out_path)
-            doc.close()
-
-            ULTIMO_ARCHIVO = out_path
-            download = True
-
-        except Exception as e:
-            info_lines.append("ERROR: " + str(e))
-            download = False
-
-    return render_template_string(
-        HTML,
-        info="\n".join(info_lines) if info_lines else None,
-        download=download
-    )
-
-
-@app.route("/download")
-def download_file():
-    global ULTIMO_ARCHIVO
-    if not ULTIMO_ARCHIVO:
-        return "No hay archivo.", 404
-    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+            # Ejecutar relleno de campos
