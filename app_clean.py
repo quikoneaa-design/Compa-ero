@@ -1,9 +1,9 @@
-# app_clean.py — Compañero V3.2 (widget-first + fallback)
+# app_clean.py — Compañero V3.3 Foco DNI (primer DNI-NIF únicamente)
 
 from flask import Flask, request, render_template_string, send_file
 import os
 import json
-import fitz  # PyMuPDF
+import fitz
 
 app = Flask(__name__)
 
@@ -17,13 +17,16 @@ ULTIMO_ARCHIVO = None
 # ===============================
 DEFAULT_PERFIL = {"dni": "50753101J"}
 
-if os.path.exists("perfil.json"):
-    with open("perfil.json", "r", encoding="utf-8") as f:
-        PERFIL = json.load(f)
-else:
+try:
+    if os.path.exists("perfil.json"):
+        with open("perfil.json", "r", encoding="utf-8") as f:
+            PERFIL = json.load(f)
+    else:
+        PERFIL = DEFAULT_PERFIL
+except Exception:
     PERFIL = DEFAULT_PERFIL
 
-DNI_USUARIO = PERFIL.get("dni", "").strip()
+DNI_USUARIO = (PERFIL.get("dni") or "").strip()
 
 # ===============================
 # HTML
@@ -31,37 +34,19 @@ DNI_USUARIO = PERFIL.get("dni", "").strip()
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V3.2</title>
+<title>Compañero V3.3</title>
 
-<h2>Compañero — Widget First + Fallback</h2>
+<h2>Compañero — Prueba Primer DNI-NIF</h2>
 
 <form method="post" enctype="multipart/form-data">
     <input type="file" name="pdf" accept="application/pdf" required>
-    <br><br>
-
-    <label>
-        <input type="radio" name="modo" value="solicitante" checked>
-        Solicitante
-    </label>
-    <label>
-        <input type="radio" name="modo" value="representante">
-        Representante
-    </label>
-
-    <br><br>
-
-    <label>
-        <input type="checkbox" name="debug" value="1">
-        Debug
-    </label>
-
     <br><br>
     <button type="submit">Procesar PDF</button>
 </form>
 
 {% if info %}
 <hr>
-<div>{{info|safe}}</div>
+<div>{{info}}</div>
 {% endif %}
 
 {% if download %}
@@ -71,36 +56,7 @@ HTML = """
 """
 
 # ===============================
-# UTILIDADES
-# ===============================
-
-LABELS = ["DNI-NIF", "DNI/NIF", "DNI", "NIF"]
-
-def buscar_label(page):
-    for label in LABELS:
-        rects = page.search_for(label)
-        if rects:
-            return label, rects[0]
-    return None, None
-
-def encontrar_widget(page, rect):
-    annots = page.annots()
-    if not annots:
-        return None
-
-    for a in annots:
-        if a.type[0] == fitz.PDF_ANNOT_WIDGET:
-            r = fitz.Rect(a.rect)
-            if r.intersects(rect) or r.y0 > rect.y0:
-                return a
-    return None
-
-def escribir_fallback(page, rect, texto):
-    caja = fitz.Rect(rect.x0, rect.y1 + 5, rect.x0 + 170, rect.y1 + 25)
-    page.insert_textbox(caja, texto, fontsize=10)
-
-# ===============================
-# RUTAS
+# LÓGICA SIMPLE
 # ===============================
 
 @app.route("/", methods=["GET", "POST"])
@@ -111,9 +67,6 @@ def index():
         return render_template_string(HTML)
 
     file = request.files.get("pdf")
-    modo = request.form.get("modo", "solicitante")
-    debug = request.form.get("debug") == "1"
-
     if not file:
         return render_template_string(HTML, info="No PDF.", download=False)
 
@@ -122,49 +75,54 @@ def index():
     file.save(input_path)
 
     doc = fitz.open(input_path)
+    page = doc[0]
 
-    resultado = False
-    metodo = None
+    # 1️⃣ Buscar primer "DNI-NIF"
+    rects = page.search_for("DNI-NIF")
+    if not rects:
+        doc.close()
+        return render_template_string(HTML, info="No se encontró DNI-NIF.", download=False)
 
-    for page in doc:
-        label_text, label_rect = buscar_label(page)
-        if not label_rect:
-            continue
+    label_rect = rects[0]
 
-        widget = encontrar_widget(page, label_rect)
+    # 2️⃣ Buscar widget a la derecha
+    widget_encontrado = None
+    widgets = page.widgets()
 
-        if widget:
-            try:
-                widget.field_value = DNI_USUARIO
-                widget.update()
-                metodo = "widget"
-                resultado = True
+    if widgets:
+        for w in widgets:
+            r = fitz.Rect(w.rect)
+
+            # Debe estar a la derecha del label
+            if r.x0 > label_rect.x1 and abs(r.y0 - label_rect.y0) < 20:
+                widget_encontrado = w
                 break
-            except:
-                pass
 
-        escribir_fallback(page, label_rect, DNI_USUARIO)
+    # 3️⃣ Escribir
+    if widget_encontrado:
+        widget_encontrado.field_value = DNI_USUARIO
+        widget_encontrado.update()
+        metodo = "widget"
+    else:
+        # Fallback: escribir texto dentro de la caja estimada
+        caja = fitz.Rect(label_rect.x1 + 5,
+                         label_rect.y0 - 2,
+                         label_rect.x1 + 260,
+                         label_rect.y1 + 12)
+
+        page.insert_textbox(caja, DNI_USUARIO, fontsize=11)
         metodo = "texto"
-        resultado = True
-        break
 
     doc.save(output_path)
     doc.close()
 
     ULTIMO_ARCHIVO = output_path
 
-    if resultado:
-        return render_template_string(
-            HTML,
-            info=f"OK — método: {metodo}",
-            download=True
-        )
-    else:
-        return render_template_string(
-            HTML,
-            info="No se encontró campo.",
-            download=False
-        )
+    return render_template_string(
+        HTML,
+        info=f"OK — método: {metodo}",
+        download=True
+    )
 
 @app.route("/download")
 def download():
