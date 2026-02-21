@@ -1,4 +1,5 @@
-# app_clean.py — Compañero V4.1 (Andratx) — Motor GENÉRICO de campos (DNI + Email)
+# app_clean.py — Compañero V4.1.2 (Andratx) — Motor GENÉRICO (DNI + Email)
+# ✅ Código COMPLETO listo para copiar/pegar
 # Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
 
 from flask import Flask, request, render_template_string, send_file
@@ -18,23 +19,30 @@ ULTIMO_ARCHIVO = None
 # ===============================
 DEFAULT_PERFIL = {
     "dni": "50753101J",
-    # "email": "tuemail@dominio.com",
+    # Pon aquí tu email (o en perfil.json):
+    "email": "TU_EMAIL_AQUI@DOMINIO.COM",
 }
 
 def load_perfil():
+    """
+    Carga perfil.json si existe. Si no existe o falla, usa DEFAULT_PERFIL.
+    """
     if os.path.exists("perfil.json"):
         try:
             with open("perfil.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                return data
+                # Fusiona con defaults para no perder claves
+                merged = dict(DEFAULT_PERFIL)
+                merged.update(data)
+                return merged
         except Exception:
-            return DEFAULT_PERFIL
-    return DEFAULT_PERFIL
+            pass
+    return dict(DEFAULT_PERFIL)
 
 PERFIL = load_perfil()
 
-def get_profile_value(key):
+def get_profile_value(key: str) -> str:
     v = PERFIL.get(key, "")
     if v is None:
         v = ""
@@ -46,9 +54,9 @@ def get_profile_value(key):
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1</title>
+<title>Compañero V4.1.2</title>
 
-<h2>Compañero — Motor de campos V4.1 (Andratx)</h2>
+<h2>Compañero — Motor de campos V4.1.2 (Andratx)</h2>
 
 <p style="margin-top:-8px; color:#555;">
   Debug: añade <b>?debug=1</b> a la URL para ver cajas (rojo=label, azul=casilla).
@@ -75,7 +83,7 @@ HTML = """
 # HELPERS (texto / geometría)
 # ===============================
 
-def find_label_rect(page, variantes):
+def find_label_rect(page: fitz.Page, variantes: list) -> fitz.Rect | None:
     found = []
     for v in variantes:
         if not v:
@@ -93,7 +101,7 @@ def find_label_rect(page, variantes):
     found.sort(key=lambda r: (r.y0, r.x0))
     return found[0]
 
-def iter_rectangles_from_drawings(page):
+def iter_rectangles_from_drawings(page: fitz.Page):
     try:
         drawings = page.get_drawings()
     except Exception:
@@ -107,29 +115,33 @@ def iter_rectangles_from_drawings(page):
                 except Exception:
                     pass
 
-def x_overlap(a, b):
+def x_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
     x0 = max(a.x0, b.x0)
     x1 = min(a.x1, b.x1)
     ov = x1 - x0
     return ov if ov > 0 else 0.0
 
-def y_overlap(a, b):
+def y_overlap(a: fitz.Rect, b: fitz.Rect) -> float:
     y0 = max(a.y0, b.y0)
     y1 = min(a.y1, b.y1)
     ov = y1 - y0
     return ov if ov > 0 else 0.0
 
-def text_width(text, fontsize):
+def text_width(text: str, fontsize: float) -> float:
     try:
         return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
     except Exception:
         return len(text) * fontsize * 0.55
 
-def pick_box_rect_generic(page, label_rect):
-    MIN_W = 35
-    MAX_W = 260
-    MIN_H = 10
-    MAX_H = 55
+def pick_box_rect_generic(page: fitz.Page, label_rect: fitz.Rect) -> fitz.Rect | None:
+    """
+    Selecciona la casilla asociada a un label.
+    Prioridad:
+      1) rectángulo debajo (misma columna)
+      2) rectángulo a la derecha (misma línea)
+    """
+    MIN_W, MAX_W = 35, 260
+    MIN_H, MAX_H = 10, 55
 
     BELOW_MAX_DY = 140
     RIGHT_MAX_DY = 45
@@ -183,7 +195,11 @@ def pick_box_rect_generic(page, label_rect):
 
     return None
 
-def write_text_centered(page, box, text):
+def write_text_centered(page: fitz.Page, box: fitz.Rect, text: str) -> float:
+    """
+    Escribe centrado dentro de 'box' con padding interno.
+    Devuelve fontsize final.
+    """
     text = (text or "").strip()
     if not text:
         return 0.0
@@ -226,9 +242,9 @@ def write_text_centered(page, box, text):
     )
     return fontsize
 
-def fill_field(page, field_name, variantes_label, value, debug, log):
+def fill_field(page: fitz.Page, field_name: str, variantes_label: list, value: str, debug: bool, log: list) -> bool:
     value = (value or "").strip()
-    if not value:
+    if not value or ("TU_EMAIL_AQUI" in value):
         log.append(f"[{field_name}] saltado (sin valor en perfil).")
         return False
 
