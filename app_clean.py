@@ -1,8 +1,8 @@
-# app_clean.py — V4.1 (Micro-ajuste horizontal DNI)
+# app_clean.py — V4.2 (Guardado seguro + microajuste izquierda)
 
 from flask import Flask, request, render_template_string, send_file
 import os
-import fitz  # PyMuPDF
+import fitz
 import json
 
 app = Flask(__name__)
@@ -24,21 +24,21 @@ DNI_USUARIO = PERFIL.get("dni", "").strip()
 # AJUSTES FINOS
 # ===============================
 FONT_SIZE = 12
-DX = -1.2   # 🔧 micro-movimiento a la izquierda
-DY = 0.0    # no tocamos vertical
+DX = -1.2   # micro-movimiento izquierda
+DY = 0.0
 
 # ===============================
 # HTML
 # ===============================
 HTML = """
 <!doctype html>
-<title>Compañero V4.1</title>
+<title>Compañero V4.2</title>
 
-<h1>Compañero — Motor DNI V4.1</h1>
+<h1>Compañero — DNI automático en casilla (Andratx V4.2)</h1>
 
 <form method="post" enctype="multipart/form-data">
   <p><input type="file" name="pdf">
-  <p><input type="submit" value="Subir y rellenar">
+  <p><input type="submit" value="Procesar PDF">
 </form>
 
 {% if archivo %}
@@ -59,11 +59,10 @@ def find_dni_label(page):
     return palabras[0] if palabras else None
 
 # ===============================
-# ENCONTRAR CAJA ASOCIADA
+# ENCONTRAR CAJA A LA DERECHA
 # ===============================
 def find_box_right_of_label(page, label_rect):
     drawings = page.get_drawings()
-
     candidate_boxes = []
 
     for d in drawings:
@@ -71,7 +70,6 @@ def find_box_right_of_label(page, label_rect):
             if item[0] == "re":
                 rect = fitz.Rect(item[1])
 
-                # Caja a la derecha del label
                 if (
                     rect.x0 > label_rect.x1
                     and abs(rect.y0 - label_rect.y0) < 20
@@ -86,11 +84,10 @@ def find_box_right_of_label(page, label_rect):
     return None
 
 # ===============================
-# INSERTAR DNI CENTRADO
+# INSERTAR DNI
 # ===============================
 def insert_dni(page, rect):
     text = DNI_USUARIO
-
     text_width = fitz.get_text_length(text, fontsize=FONT_SIZE)
 
     x = rect.x0 + (rect.width - text_width) / 2 + DX
@@ -128,7 +125,9 @@ def index():
                     insert_dni(page, box)
 
             salida = os.path.join(UPLOAD_FOLDER, "rellenado.pdf")
-            doc.save(salida)
+
+            # 🔥 Guardado seguro
+            doc.save(salida, garbage=4, deflate=True, clean=True)
             doc.close()
 
             ULTIMO_ARCHIVO = salida
