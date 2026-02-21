@@ -1,8 +1,7 @@
-# app_clean.py — Compañero V3.5 Overlay real
+# app_clean.py — TEST EJECUCIÓN REAL SERVIDOR
 
 from flask import Flask, request, render_template_string, send_file
 import os
-import json
 import fitz
 
 app = Flask(__name__)
@@ -12,25 +11,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ULTIMO_ARCHIVO = None
 
-DEFAULT_PERFIL = {"dni": "50753101J"}
-
-try:
-    if os.path.exists("perfil.json"):
-        with open("perfil.json", "r", encoding="utf-8") as f:
-            PERFIL = json.load(f)
-    else:
-        PERFIL = DEFAULT_PERFIL
-except Exception:
-    PERFIL = DEFAULT_PERFIL
-
-DNI_USUARIO = (PERFIL.get("dni") or "").strip()
-
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V3.5</title>
+<title>PRUEBA 123456</title>
 
-<h2>Compañero — Overlay DNI</h2>
+<h2 style="color:red;">PRUEBA 123456 - SERVIDOR NUEVO</h2>
 
 <form method="post" enctype="multipart/form-data">
     <input type="file" name="pdf" accept="application/pdf" required>
@@ -40,7 +26,7 @@ HTML = """
 
 {% if info %}
 <hr>
-<div>{{info}}</div>
+<div style="font-size:20px;color:blue;">{{info}}</div>
 {% endif %}
 
 {% if download %}
@@ -58,7 +44,7 @@ def index():
 
     file = request.files.get("pdf")
     if not file:
-        return render_template_string(HTML, info="No PDF.", download=False)
+        return render_template_string(HTML, info="NO HAY PDF", download=False)
 
     input_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
     output_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
@@ -67,27 +53,11 @@ def index():
     doc = fitz.open(input_path)
     page = doc[0]
 
-    rects = (
-        page.search_for("DNI-NIF") or
-        page.search_for("DNI o NIF") or
-        page.search_for("DNI/NIF") or
-        page.search_for("DNI")
-    )
-
-    if not rects:
-        doc.close()
-        return render_template_string(HTML, info="No se encontró DNI.", download=False)
-
-    label_rect = rects[0]
-
-    # Posición ligeramente a la derecha del label
-    x = label_rect.x1 + 10
-    y = label_rect.y1 - 2
-
+    # ESCRIBIR TEXTO EN POSICIÓN FIJA ARRIBA DEL TODO
     page.insert_text(
-        (x, y),
-        DNI_USUARIO,
-        fontsize=14,
+        (50, 50),
+        "50753101J",
+        fontsize=30,
         overlay=True
     )
 
@@ -98,9 +68,10 @@ def index():
 
     return render_template_string(
         HTML,
-        info="OK — overlay directo",
+        info="SE HA EJECUTADO EL NUEVO CÓDIGO",
         download=True
     )
+
 
 @app.route("/download")
 def download():
@@ -108,6 +79,7 @@ def download():
     if not ULTIMO_ARCHIVO:
         return "Nada para descargar."
     return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+
 
 if __name__ == "__main__":
     app.run(debug=True)
