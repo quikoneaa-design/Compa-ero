@@ -1,4 +1,4 @@
-# app_clean.py — Compañero V3.6 Diagnóstico geométrico
+# app_clean.py — Compañero V3.6B Diagnóstico geométrico robusto
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -14,9 +14,9 @@ ULTIMO_ARCHIVO = None
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V3.6 Diagnóstico</title>
+<title>Compañero V3.6B Diagnóstico</title>
 
-<h2>Diagnóstico Rectángulos DNI</h2>
+<h2>Diagnóstico Rectángulos DNI (Robusto)</h2>
 
 <form method="post" enctype="multipart/form-data">
     <input type="file" name="pdf" accept="application/pdf" required>
@@ -63,30 +63,30 @@ def index():
 
     if rects:
         label_rect = rects[0]
-        # Dibujar label en ROJO
         page.draw_rect(label_rect, color=(1, 0, 0), width=2)
     else:
         label_rect = None
 
-    # 2️⃣ Detectar rectángulos vectoriales
-    dibujos = page.get_drawings()
+    # 2️⃣ Detectar rectángulos reales en dibujos
+    drawings = page.get_drawings()
     contador = 0
 
-    for d in dibujos:
-        if "rect" in d:
-            for r in d["rect"]:
-                rect = fitz.Rect(r)
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] == "re":  # "re" significa rectangle
+                rect = fitz.Rect(item[1])
 
-                # Dibujar en AZUL todos los rectángulos detectados
+                # Dibujar rectángulo detectado
                 page.draw_rect(rect, color=(0, 0, 1), width=1)
 
-                # Numerarlos
+                # Numerarlo
                 page.insert_text(
-                    (rect.x0, rect.y0 - 3),
+                    (rect.x0, rect.y0 - 2),
                     str(contador),
                     fontsize=8,
                     overlay=True
                 )
+
                 contador += 1
 
     doc.save(output_path)
