@@ -1,7 +1,9 @@
-# app_clean.py — Compañero V4.1.4 (Andratx) — Motor GENÉRICO (DNI + Email) con anclaje lógico
-# ✅ CÓDIGO COMPLETO
-# Email se elige "cerca" del DNI del SOLICITANTE para evitar el correo de "MITJÀ PREFERENT..."
-# Debug opcional: añade ?debug=1 a la URL para ver rectángulos (rojo=label, azul=casilla)
+# app_clean.py — Compañero V4.1.7 (Base REAL V4.1.4 + Teléfono SIN tocar geometría)
+# ✅ DNI
+# ✅ Email (anclado cerca del DNI del solicitante)
+# ✅ Teléfono (anclado cerca del Email)
+# 🔒 pick_box_rect_generic() RESTAURADA EXACTA de V4.1.4
+# Debug opcional: ?debug=1
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -20,7 +22,8 @@ ULTIMO_ARCHIVO = None
 # ===============================
 DEFAULT_PERFIL = {
     "dni": "50753101J",
-    "email": "tuemailreal@dominio.com"
+    "email": "tuemailreal@dominio.com",
+    "telefono": "600000000"
 }
 
 def load_perfil():
@@ -50,13 +53,11 @@ def get_profile_value(key):
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.4</title>
+<title>Compañero V4.1.7</title>
 
-<h2>Compañero — Motor de campos V4.1.4 (Andratx)</h2>
+<h2>Compañero — Motor estable (DNI + Email + Teléfono)</h2>
 
-<p style="margin-top:-8px; color:#555;">
-  Debug: añade <b>?debug=1</b> a la URL para ver cajas (rojo=label, azul=casilla).
-</p>
+<p>Debug: añade <b>?debug=1</b> para ver cajas.</p>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -76,7 +77,7 @@ HTML = """
 """
 
 # ===============================
-# HELPERS
+# HELPERS (ORIGINAL V4.1.4)
 # ===============================
 
 def find_all_label_rects(page, variants):
@@ -94,8 +95,8 @@ def find_all_label_rects(page, variants):
     return found
 
 def find_first_label_rect(page, variants):
-    all_rects = find_all_label_rects(page, variants)
-    return all_rects[0] if all_rects else None
+    rects = find_all_label_rects(page, variants)
+    return rects[0] if rects else None
 
 def iter_rectangles_from_drawings(page):
     try:
@@ -132,7 +133,6 @@ def text_width(text, fontsize):
 def pick_box_rect_generic(page, label_rect):
     MIN_W, MAX_W = 35, 260
     MIN_H, MAX_H = 10, 55
-
     BELOW_MAX_DY = 140
     RIGHT_MAX_DY = 45
 
@@ -187,8 +187,7 @@ def write_text_centered(page, box, text):
 
     pad_x = max(1.0, box.width * 0.06)
     pad_y = max(0.8, box.height * 0.18)
-
-    inner = fitz.Rect(box.x0 + pad_x, box.y0 + pad_y, box.x1 - pad_x, box.y1 - pad_y)
+    inner = fitz.Rect(box.x0+pad_x, box.y0+pad_y, box.x1-pad_x, box.y1-pad_y)
 
     fontsize = max(6.0, min(12.5, inner.height * 0.78))
 
@@ -202,89 +201,37 @@ def write_text_centered(page, box, text):
 
     tw = text_width(text, fontsize)
     x = inner.x0 + (inner.width - tw) / 2.0
-    if x < inner.x0:
-        x = inner.x0
+    y = (inner.y0 + inner.y1) / 2.0 + (fontsize * 0.33)
 
-    y_center = (inner.y0 + inner.y1) / 2.0
-    y = y_center + (fontsize * 0.33)
-
-    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", color=(0, 0, 0), overlay=True)
+    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", overlay=True)
     return fontsize
 
-def pick_email_label_near_dni(page, email_labels, dni_label_rect):
-    """
-    Selecciona el label de Email "del solicitante" buscando el que esté:
-    - cerca en Y del DNI del solicitante (misma banda/tabla)
-    - y a la derecha del DNI (normal en Andratx)
-    """
-    candidates = find_all_label_rects(page, email_labels)
-    if not candidates:
-        return None
+def pick_label_near_anchor(page, variants, anchor_rect):
+    candidates = find_all_label_rects(page, variants)
+    if not candidates or not anchor_rect:
+        return candidates[0] if candidates else None
 
-    # Si no tenemos DNI anchor, fallback al primero (arriba/izq)
-    if not dni_label_rect:
-        return candidates[0]
-
-    dni_cy = (dni_label_rect.y0 + dni_label_rect.y1) / 2.0
+    anchor_cy = (anchor_rect.y0 + anchor_rect.y1) / 2.0
 
     scored = []
     for r in candidates:
         r_cy = (r.y0 + r.y1) / 2.0
-        dy = abs(r_cy - dni_cy)
-
-        # Preferimos que esté en la misma fila (dy pequeño) y a la derecha del DNI
-        right_bonus = 0.0
-        if r.x0 >= (dni_label_rect.x1 - 5):
-            right_bonus = -50.0
-
-        # Penaliza si está muy lejos en Y (probable "MITJÀ PREFERENT...")
-        far_penalty = 0.0
-        if dy > 80:
-            far_penalty = dy * 3.0
-
-        score = (dy + far_penalty + right_bonus, r.y0, r.x0)
+        dy = abs(r_cy - anchor_cy)
+        score = (dy, r.x0)
         scored.append((score, r))
 
     scored.sort(key=lambda t: t[0])
     return scored[0][1]
 
-def fill_field_with_label(page, field_name, label_rect, value, debug, log):
-    value = (value or "").strip()
-    if not value:
-        log.append(f"[{field_name}] saltado (sin valor).")
-        return False
-
-    if not label_rect:
-        log.append(f"[{field_name}] NO encontrado label.")
-        return False
-
-    box = pick_box_rect_generic(page, label_rect)
-    if not box:
-        log.append(f"[{field_name}] NO encontrada casilla.")
-        return False
-
-    if debug:
-        page.draw_rect(label_rect, color=(1, 0, 0), width=0.8)
-        page.draw_rect(box, color=(0, 0, 1), width=0.8)
-
-    fs = write_text_centered(page, box, value)
-    log.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
-    return True
-
 # ===============================
 # LABELS
 # ===============================
 DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
-EMAIL_LABELS = [
-    "Adreça de correu electrònic",
-    "Dirección de correo electrónico",
-    "Correo electrónico",
-    "Email",
-    "E-mail",
-]
+EMAIL_LABELS = ["Adreça de correu electrònic", "Dirección de correo electrónico", "Correo electrónico", "Email", "E-mail"]
+TEL_LABELS = ["Telèfon", "Teléfono", "Tel."]
 
 # ===============================
-# ROUTES
+# ROUTE
 # ===============================
 
 @app.route("/", methods=["GET", "POST"])
@@ -307,31 +254,35 @@ def index():
         doc = fitz.open(in_path)
         page = doc[0]
 
-        # 1) Anchor DNI (solicitante): primer DNI-NIF de la página (arriba)
+        # 1️⃣ DNI
         dni_label = find_first_label_rect(page, DNI_LABELS)
 
-        # 2) Email: escoger label cercano al DNI del solicitante (misma tabla)
-        email_label = pick_email_label_near_dni(page, EMAIL_LABELS, dni_label)
+        # 2️⃣ Email cerca del DNI
+        email_label = pick_label_near_anchor(page, EMAIL_LABELS, dni_label)
 
-        # Rellenar DNI
-        fill_field_with_label(
-            page=page,
-            field_name="DNI",
-            label_rect=dni_label,
-            value=get_profile_value("dni"),
-            debug=debug,
-            log=info_lines
-        )
+        # 3️⃣ Teléfono cerca del Email
+        tel_label = pick_label_near_anchor(page, TEL_LABELS, email_label)
 
-        # Rellenar Email
-        fill_field_with_label(
-            page=page,
-            field_name="Email",
-            label_rect=email_label,
-            value=get_profile_value("email"),
-            debug=debug,
-            log=info_lines
-        )
+        for field_name, label_rect, value in [
+            ("DNI", dni_label, get_profile_value("dni")),
+            ("Email", email_label, get_profile_value("email")),
+            ("Teléfono", tel_label, get_profile_value("telefono")),
+        ]:
+            if not label_rect:
+                info_lines.append(f"[{field_name}] label NO encontrado.")
+                continue
+
+            box = pick_box_rect_generic(page, label_rect)
+            if not box:
+                info_lines.append(f"[{field_name}] casilla NO encontrada.")
+                continue
+
+            if debug:
+                page.draw_rect(label_rect, color=(1,0,0), width=0.8)
+                page.draw_rect(box, color=(0,0,1), width=0.8)
+
+            fs = write_text_centered(page, box, value)
+            info_lines.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
 
         doc.save(out_path)
         doc.close()
