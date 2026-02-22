@@ -1,6 +1,7 @@
-# app_clean.py — Compañero V4.2.4
-# 🔒 Base V4.2.2 intacta
-# 🛡 Nombre con blindaje absoluto (entre label Nombre y label DNI)
+# app_clean.py — Compañero V4.2.5
+# 🔒 Fila DNI blindada
+# 🔒 Perfil estructurado compatible
+# 🛡 Nombre entre label Nombre y DNI
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -15,28 +16,43 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL ESTRUCTURADO
+# PERFIL ROBUSTO
 # ===============================
 
+DEFAULT_PERFIL = {
+    "nombre": "Enrique Afonso Álvarez",
+    "dni": "50753101J",
+    "email": "quikon.eaa@gmail.com",
+    "telefono": "640358930"
+}
+
 def load_perfil():
+    data = {}
     if os.path.exists("perfil.json"):
-        with open("perfil.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+        try:
+            with open("perfil.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except:
+            pass
+
+    merged = dict(DEFAULT_PERFIL)
+
+    # Leer perfil estructurado si existe
+    if isinstance(data, dict):
+        identidad = data.get("identidad", {})
+        contacto = data.get("contacto", {})
+
+        merged["nombre"] = identidad.get("nombre_completo", merged["nombre"])
+        merged["dni"] = identidad.get("dni", merged["dni"])
+        merged["email"] = contacto.get("email", merged["email"])
+        merged["telefono"] = contacto.get("telefono", merged["telefono"])
+
+    return merged
 
 PERFIL = load_perfil()
 
-def get_nombre():
-    return PERFIL.get("identidad", {}).get("nombre_completo", "")
-
-def get_dni():
-    return PERFIL.get("identidad", {}).get("dni", "")
-
-def get_email():
-    return PERFIL.get("contacto", {}).get("email", "")
-
-def get_telefono():
-    return PERFIL.get("contacto", {}).get("telefono", "")
+def get_profile_value(key):
+    return str(PERFIL.get(key, "")).strip()
 
 # ===============================
 # HTML
@@ -45,9 +61,9 @@ def get_telefono():
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.2.4</title>
+<title>Compañero V4.2.5</title>
 
-<h2>Compañero — Motor estable + Nombre blindado</h2>
+<h2>Compañero — Motor estable</h2>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -118,30 +134,23 @@ def write_text_centered(page, box, text):
     page.insert_textbox(inner, text, fontsize=fontsize, fontname="helv", align=1)
 
 # ===============================
-# NOMBRE — BLINDAJE ABSOLUTO
+# NOMBRE BLINDADO
 # ===============================
 
 def pick_name_box(page, name_label_rect, dni_label_rect):
     candidates = []
 
     for r in iter_rectangles_from_drawings(page):
-
-        # Debe estar debajo del label Nombre
         if r.y0 < name_label_rect.y1 - 1:
             continue
-
-        # Debe estar por encima del label DNI (si existe)
         if dni_label_rect and r.y0 >= dni_label_rect.y0:
             continue
-
-        # Debe tener tamaño razonable
         if 12 <= r.height <= 40:
             candidates.append(r)
 
     if not candidates:
         return None
 
-    # Elegimos la más ancha dentro del rango válido
     candidates.sort(key=lambda r: r.width, reverse=True)
     return candidates[0]
 
@@ -155,8 +164,12 @@ NAME_LABELS = [
 ]
 
 DNI_LABELS = ["DNI-NIF", "DNI", "NIF"]
-EMAIL_LABELS = ["correu electrònic", "correo electrónico", "Email"]
-TEL_LABELS = ["Telèfon", "Teléfono"]
+EMAIL_LABELS = [
+    "Adreça de correu electrònic / Dirección de correo electrónico"
+]
+TEL_LABELS = [
+    "Telèfon / Teléfono"
+]
 
 # ===============================
 # ROUTE
@@ -180,28 +193,27 @@ def index():
         doc = fitz.open(in_path)
         page = doc[0]
 
-        # Detectamos labels principales
         name_label = find_first_label_rect(page, NAME_LABELS)
         dni_label = find_first_label_rect(page, DNI_LABELS)
 
-        # ➕ Nombre blindado
+        # Nombre
         if name_label:
             name_box = pick_name_box(page, name_label, dni_label)
             if name_box:
-                write_text_centered(page, name_box, get_nombre())
+                write_text_centered(page, name_box, get_profile_value("nombre"))
                 info.append("[Nombre] OK")
 
-        # 🔒 FILA DNI (NO MODIFICADA)
-        for field, label_variants, getter in [
-            ("DNI", DNI_LABELS, get_dni),
-            ("Email", EMAIL_LABELS, get_email),
-            ("Teléfono", TEL_LABELS, get_telefono),
+        # Fila DNI
+        for field, label_variants, key in [
+            ("DNI", DNI_LABELS, "dni"),
+            ("Email", EMAIL_LABELS, "email"),
+            ("Teléfono", TEL_LABELS, "telefono"),
         ]:
             label = find_first_label_rect(page, label_variants)
             if label:
                 box = pick_box_rect_generic(page, label)
                 if box:
-                    write_text_centered(page, box, getter())
+                    write_text_centered(page, box, get_profile_value(key))
                     info.append(f"[{field}] OK")
 
         doc.save(out_path)
