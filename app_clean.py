@@ -1,11 +1,11 @@
-# app_clean.py — Compañero V4.2.2
-# 🔒 Base blindada intacta
-# ➕ Nombre con regla específica (elige caja grande)
+# app_clean.py — Compañero V4.x BASE BLINDADA (Andratx estable)
+# DNI correcto debajo del label + fila horizontal DNI / Email / Teléfono
+# NO tocar helpers críticos
 
 from flask import Flask, request, render_template_string, send_file
 import os
 import json
-import fitz
+import fitz  # PyMuPDF
 
 app = Flask(__name__)
 
@@ -15,205 +15,183 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL
+# PERFIL MAESTRO
 # ===============================
-DEFAULT_PERFIL = {
-    "nombre": "Enrique Afonso Álvarez",
-    "dni": "50753101J",
-    "email": "tuemailreal@dominio.com",
-    "telefono": "600000000"
-}
+with open("perfil.json", "r", encoding="utf-8") as f:
+    PERFIL = json.load(f)
 
-def load_perfil():
-    if os.path.exists("perfil.json"):
-        try:
-            with open("perfil.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-            merged = dict(DEFAULT_PERFIL)
-            merged.update(data)
-            return merged
-        except:
-            pass
-    return dict(DEFAULT_PERFIL)
-
-PERFIL = load_perfil()
-
-def get_profile_value(key):
-    return str(PERFIL.get(key, "")).strip()
+NOMBRE_USUARIO = PERFIL.get("identidad", {}).get("nombre_completo", "")
+DNI_USUARIO = PERFIL.get("identidad", {}).get("dni", "")
+EMAIL_USUARIO = PERFIL.get("contacto", {}).get("email", "")
+TEL_USUARIO = PERFIL.get("contacto", {}).get("telefono", "")
 
 # ===============================
 # HTML
 # ===============================
 HTML = """
 <!doctype html>
-<meta charset="utf-8">
-<title>Compañero V4.2.2</title>
-
-<h2>Compañero — Motor estable + Nombre corregido</h2>
-
+<title>Compañero V4.x</title>
+<h1>Compañero — Base Blindada</h1>
 <form method="post" enctype="multipart/form-data">
-  <input type="file" name="pdf" accept="application/pdf" required>
-  <br><br>
-  <button type="submit">Procesar PDF</button>
+  <input type="file" name="pdf" required>
+  <button type="submit">Subir y rellenar</button>
 </form>
-
-{% if info %}
-<hr>
-<div style="white-space: pre-wrap;">{{ info }}</div>
-{% endif %}
-
-{% if download %}
-<br>
-<a href="/download">Descargar PDF</a>
-{% endif %}
 """
 
 # ===============================
-# HELPERS BASE
+# DETECTOR LABEL DNI
 # ===============================
+def find_dni_label(page):
+    keywords = ["DNI", "DNI-NIF", "NIF"]
+    for kw in keywords:
+        areas = page.search_for(kw)
+        if areas:
+            return areas[0]
+    return None
 
-def find_all_label_rects(page, variants):
-    found = []
-    for v in variants:
-        try:
-            rects = page.search_for(v)
-            if rects:
-                found.extend(rects)
-        except:
-            pass
-    found.sort(key=lambda r: (r.y0, r.x0))
-    return found
+# ===============================
+# PICK CAJA DNI (BLINDADO)
+# Prioridad: debajo del label
+# Fallback: derecha del label
+# ===============================
+def pick_dni_box_rect(page, label_rect):
+    drawings = page.get_drawings()
+    candidates = []
 
-def find_first_label_rect(page, variants):
-    rects = find_all_label_rects(page, variants)
-    return rects[0] if rects else None
-
-def iter_rectangles_from_drawings(page):
-    try:
-        drawings = page.get_drawings()
-    except:
-        drawings = []
     for d in drawings:
-        for it in d.get("items", []):
-            if it and it[0] == "re":
-                try:
-                    yield fitz.Rect(it[1])
-                except:
-                    pass
+        for item in d["items"]:
+            if item[0] == "re":  # rectángulo
+                rect = fitz.Rect(item[1])
 
-def pick_box_rect_generic(page, label_rect):
-    candidates = []
-    for r in iter_rectangles_from_drawings(page):
-        if r.y0 >= label_rect.y1 - 1:
-            candidates.append(r)
-    if not candidates:
-        return None
-    candidates.sort(key=lambda r: (r.y0 - label_rect.y1))
-    return candidates[0]
+                # tamaño típico casilla
+                if 50 < rect.width < 300 and 12 < rect.height < 40:
 
-def write_text_centered(page, box, text):
-    if not text:
-        return
-    pad = 4
-    inner = fitz.Rect(box.x0+pad, box.y0+pad, box.x1-pad, box.y1-pad)
-    fontsize = min(12, inner.height * 0.75)
-    page.insert_textbox(inner, text, fontsize=fontsize, fontname="helv", align=1)
+                    # scoring
+                    score = 0
 
-# ===============================
-# NUEVO: Nombre específico
-# ===============================
+                    # prioridad debajo
+                    if rect.y0 >= label_rect.y1:
+                        vertical_gap = rect.y0 - label_rect.y1
+                        if 0 <= vertical_gap < 60:
+                            score += 100 - vertical_gap
 
-def pick_name_box(page, label_rect):
-    """
-    Busca la caja más ancha debajo del label.
-    Evita coger la caja del DNI.
-    """
-    candidates = []
-    for r in iter_rectangles_from_drawings(page):
-        if r.y0 >= label_rect.y1 - 1:
-            height_ok = 10 <= r.height <= 40
-            width_ok = r.width > 250  # caja grande
-            if height_ok and width_ok:
-                candidates.append(r)
+                    # fallback derecha
+                    if rect.x0 >= label_rect.x1:
+                        horizontal_gap = rect.x0 - label_rect.x1
+                        if 0 <= horizontal_gap < 200:
+                            score += 50 - horizontal_gap
+
+                    if score > 0:
+                        candidates.append((score, rect))
 
     if not candidates:
         return None
 
-    # coger la más cercana verticalmente
-    candidates.sort(key=lambda r: r.y0)
-    return candidates[0]
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 # ===============================
-# LABELS
+# BUSCAR CAJA A LA DERECHA (para email / teléfono)
 # ===============================
-NAME_LABELS = [
-    "Nom de l'entitat o persona física",
-    "Nombre de la entidad o persona física"
-]
+def pick_box_rect_generic(page, anchor_rect):
+    drawings = page.get_drawings()
+    candidates = []
 
-DNI_LABELS = ["DNI-NIF", "DNI", "NIF"]
-EMAIL_LABELS = ["correu electrònic", "correo electrónico", "Email"]
-TEL_LABELS = ["Telèfon", "Teléfono"]
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] == "re":
+                rect = fitz.Rect(item[1])
+
+                if 50 < rect.width < 350 and 12 < rect.height < 40:
+
+                    # alineado horizontalmente
+                    if abs(rect.y0 - anchor_rect.y0) < 10:
+
+                        if rect.x0 > anchor_rect.x1:
+                            gap = rect.x0 - anchor_rect.x1
+                            if gap < 250:
+                                candidates.append((gap, rect))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
 
 # ===============================
-# ROUTE
+# ESCRITURA CENTRADA
 # ===============================
+def write_text_centered(page, rect, text, fontsize=10):
+    text_length = fitz.get_text_length(text, fontsize=fontsize)
+    x = rect.x0 + (rect.width - text_length) / 2
+    y = rect.y0 + rect.height * 0.7
+    page.insert_text((x, y), text, fontsize=fontsize, overlay=True)
 
+# ===============================
+# RELLENAR PDF
+# ===============================
+def rellenar_pdf(path):
+    doc = fitz.open(path)
+
+    for page in doc:
+
+        label_rect = find_dni_label(page)
+        if not label_rect:
+            continue
+
+        dni_rect = pick_dni_box_rect(page, label_rect)
+        if not dni_rect:
+            continue
+
+        # DEBUG VISUAL
+        page.draw_rect(label_rect, color=(1, 0, 0), width=1)  # rojo label
+        page.draw_rect(dni_rect, color=(0, 0, 1), width=1)    # azul DNI
+
+        # ESCRIBIR DNI
+        write_text_centered(page, dni_rect, DNI_USUARIO, fontsize=11)
+
+        # EMAIL
+        email_rect = pick_box_rect_generic(page, dni_rect)
+        if email_rect:
+            page.draw_rect(email_rect, color=(0, 1, 0), width=1)
+            write_text_centered(page, email_rect, EMAIL_USUARIO, fontsize=9)
+
+            # TELÉFONO
+            tel_rect = pick_box_rect_generic(page, email_rect)
+            if tel_rect:
+                page.draw_rect(tel_rect, color=(1, 0.5, 0), width=1)
+                write_text_centered(page, tel_rect, TEL_USUARIO, fontsize=9)
+
+        break  # solo primera página relevante
+
+    output_path = os.path.join(UPLOAD_FOLDER, "resultado.pdf")
+    doc.save(output_path)
+    doc.close()
+
+    return output_path
+
+# ===============================
+# ROUTES
+# ===============================
 @app.route("/", methods=["GET", "POST"])
 def index():
     global ULTIMO_ARCHIVO
-    info = []
-    download = False
 
     if request.method == "POST":
-        f = request.files.get("pdf")
-        if not f:
-            return render_template_string(HTML)
+        file = request.files["pdf"]
+        if file:
+            path = os.path.join(UPLOAD_FOLDER, file.filename)
+            file.save(path)
 
-        in_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
-        out_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
-        f.save(in_path)
+            resultado = rellenar_pdf(path)
+            ULTIMO_ARCHIVO = resultado
 
-        doc = fitz.open(in_path)
-        page = doc[0]
+            return send_file(resultado, as_attachment=True)
 
-        # 🔒 Fila blindada
-        dni_label = find_first_label_rect(page, DNI_LABELS)
-        email_label = find_first_label_rect(page, EMAIL_LABELS)
-        tel_label = find_first_label_rect(page, TEL_LABELS)
+    return render_template_string(HTML)
 
-        # ➕ Nombre específico
-        name_label = find_first_label_rect(page, NAME_LABELS)
-        if name_label:
-            name_box = pick_name_box(page, name_label)
-            if name_box:
-                write_text_centered(page, name_box, get_profile_value("nombre"))
-                info.append("[Nombre] OK")
-
-        for field, label, key in [
-            ("DNI", dni_label, "dni"),
-            ("Email", email_label, "email"),
-            ("Teléfono", tel_label, "telefono"),
-        ]:
-            if label:
-                box = pick_box_rect_generic(page, label)
-                if box:
-                    write_text_centered(page, box, get_profile_value(key))
-                    info.append(f"[{field}] OK")
-
-        doc.save(out_path)
-        doc.close()
-
-        ULTIMO_ARCHIVO = out_path
-        download = True
-
-    return render_template_string(HTML, info="\n".join(info), download=download)
-
-@app.route("/download")
-def download_file():
-    if not ULTIMO_ARCHIVO:
-        return "No hay archivo", 404
-    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
+# ===============================
+# RUN
+# ===============================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(debug=True)
