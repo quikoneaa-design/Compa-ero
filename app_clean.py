@@ -1,8 +1,9 @@
-# app_clean.py — Compañero V4.1.7 (Base REAL V4.1.4 + Teléfono SIN tocar geometría)
+# app_clean.py — Compañero V4.1.7.1 (BASE V4.1.7 + Perfil estructurado compatible)
+# ✅ Geometría y anclaje IGUAL que V4.1.7
 # ✅ DNI
 # ✅ Email (anclado cerca del DNI del solicitante)
 # ✅ Teléfono (anclado cerca del Email)
-# 🔒 pick_box_rect_generic() RESTAURADA EXACTA de V4.1.4
+# 🔒 pick_box_rect_generic() INTACTA (V4.1.4)
 # Debug opcional: ?debug=1
 
 from flask import Flask, request, render_template_string, send_file
@@ -18,8 +19,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ULTIMO_ARCHIVO = None
 
 # ===============================
-# PERFIL
+# PERFIL (PLANO + ESTRUCTURADO)
 # ===============================
+
 DEFAULT_PERFIL = {
     "dni": "50753101J",
     "email": "tuemailreal@dominio.com",
@@ -27,17 +29,44 @@ DEFAULT_PERFIL = {
 }
 
 def load_perfil():
+    data = {}
     if os.path.exists("perfil.json"):
         try:
             with open("perfil.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, dict):
-                merged = dict(DEFAULT_PERFIL)
-                merged.update(data)
-                return merged
         except Exception:
-            pass
-    return dict(DEFAULT_PERFIL)
+            data = {}
+
+    merged = dict(DEFAULT_PERFIL)
+
+    if not isinstance(data, dict):
+        return merged
+
+    # ---- 1) FORMATO PLANO (dni/email/telefono) ----
+    for k in ("dni", "email", "telefono"):
+        v = data.get(k, None)
+        if v is not None and str(v).strip():
+            merged[k] = str(v).strip()
+
+    # ---- 2) FORMATO ESTRUCTURADO (identidad/contacto) ----
+    identidad = data.get("identidad", {})
+    contacto = data.get("contacto", {})
+
+    if isinstance(identidad, dict):
+        v = identidad.get("dni", None)
+        if v is not None and str(v).strip():
+            merged["dni"] = str(v).strip()
+
+    if isinstance(contacto, dict):
+        v = contacto.get("email", None)
+        if v is not None and str(v).strip():
+            merged["email"] = str(v).strip()
+
+        v = contacto.get("telefono", None)
+        if v is not None and str(v).strip():
+            merged["telefono"] = str(v).strip()
+
+    return merged
 
 PERFIL = load_perfil()
 
@@ -50,10 +79,11 @@ def get_profile_value(key):
 # ===============================
 # HTML
 # ===============================
+
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.7</title>
+<title>Compañero V4.1.7.1</title>
 
 <h2>Compañero — Motor estable (DNI + Email + Teléfono)</h2>
 
@@ -77,7 +107,7 @@ HTML = """
 """
 
 # ===============================
-# HELPERS (ORIGINAL V4.1.4)
+# HELPERS (ORIGINAL V4.1.4) — INTACTOS
 # ===============================
 
 def find_all_label_rects(page, variants):
@@ -244,64 +274,4 @@ def index():
 
     if request.method == "POST":
         f = request.files.get("pdf")
-        if not f or not f.filename.lower().endswith(".pdf"):
-            return render_template_string(HTML, info="Sube un PDF válido.", download=False)
-
-        in_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
-        out_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
-        f.save(in_path)
-
-        doc = fitz.open(in_path)
-        page = doc[0]
-
-        # 1️⃣ DNI
-        dni_label = find_first_label_rect(page, DNI_LABELS)
-
-        # 2️⃣ Email cerca del DNI
-        email_label = pick_label_near_anchor(page, EMAIL_LABELS, dni_label)
-
-        # 3️⃣ Teléfono cerca del Email
-        tel_label = pick_label_near_anchor(page, TEL_LABELS, email_label)
-
-        for field_name, label_rect, value in [
-            ("DNI", dni_label, get_profile_value("dni")),
-            ("Email", email_label, get_profile_value("email")),
-            ("Teléfono", tel_label, get_profile_value("telefono")),
-        ]:
-            if not label_rect:
-                info_lines.append(f"[{field_name}] label NO encontrado.")
-                continue
-
-            box = pick_box_rect_generic(page, label_rect)
-            if not box:
-                info_lines.append(f"[{field_name}] casilla NO encontrada.")
-                continue
-
-            if debug:
-                page.draw_rect(label_rect, color=(1,0,0), width=0.8)
-                page.draw_rect(box, color=(0,0,1), width=0.8)
-
-            fs = write_text_centered(page, box, value)
-            info_lines.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
-
-        doc.save(out_path)
-        doc.close()
-
-        ULTIMO_ARCHIVO = out_path
-        download = True
-
-    return render_template_string(
-        HTML,
-        info="\n".join(info_lines) if info_lines else None,
-        download=download
-    )
-
-@app.route("/download")
-def download_file():
-    global ULTIMO_ARCHIVO
-    if not ULTIMO_ARCHIVO:
-        return "No hay archivo.", 404
-    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+        if not f or not f.filename.lower
