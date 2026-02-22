@@ -1,7 +1,8 @@
-# app_clean.py — Compañero V4.2.6
-# 🔒 Fila DNI blindada
-# 🛡 Nombre entre label Nombre y DNI
-# 🚨 Incluye marcador visible para verificar deploy
+# app_clean.py — Compañero V4.2.7 ESTABLE
+# ✔ Ruta "/" operativa
+# ✔ Fila DNI blindada
+# ✔ Nombre entre label Nombre y DNI
+# ✔ Perfil robusto con fallback
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -60,9 +61,9 @@ def get_profile_value(key):
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.2.6</title>
+<title>Compañero V4.2.7</title>
 
-<h2>🚨 TEST DEPLOY V4.2.6 — SI VES ESTO, ES EL CÓDIGO NUEVO 🚨</h2>
+<h2>Compañero — Motor estable</h2>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -82,7 +83,7 @@ HTML = """
 """
 
 # ===============================
-# HELPERS BASE (NO TOCAR)
+# HELPERS BASE
 # ===============================
 
 def find_all_label_rects(page, variants):
@@ -133,8 +134,103 @@ def write_text_centered(page, box, text):
     page.insert_textbox(inner, text, fontsize=fontsize, fontname="helv", align=1)
 
 # ===============================
-# NOMBRE BLINDADO
+# NOMBRE ENTRE SU LABEL Y DNI
 # ===============================
 
 def pick_name_box(page, name_label_rect, dni_label_rect):
-    candidates
+    candidates = []
+
+    for r in iter_rectangles_from_drawings(page):
+        if r.y0 < name_label_rect.y1 - 1:
+            continue
+        if dni_label_rect and r.y0 >= dni_label_rect.y0:
+            continue
+        if 12 <= r.height <= 40:
+            candidates.append(r)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda r: r.width, reverse=True)
+    return candidates[0]
+
+# ===============================
+# LABELS
+# ===============================
+
+NAME_LABELS = [
+    "Nom de l'entitat o persona física",
+    "Nombre de la entidad o persona física"
+]
+
+DNI_LABELS = ["DNI-NIF", "DNI", "NIF"]
+
+EMAIL_LABELS = [
+    "Adreça de correu electrònic / Dirección de correo electrónico"
+]
+
+TEL_LABELS = [
+    "Telèfon / Teléfono"
+]
+
+# ===============================
+# RUTAS
+# ===============================
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    global ULTIMO_ARCHIVO
+    info = []
+    download = False
+
+    if request.method == "POST":
+        f = request.files.get("pdf")
+        if not f:
+            return render_template_string(HTML)
+
+        in_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
+        out_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
+        f.save(in_path)
+
+        doc = fitz.open(in_path)
+        page = doc[0]
+
+        name_label = find_first_label_rect(page, NAME_LABELS)
+        dni_label = find_first_label_rect(page, DNI_LABELS)
+
+        # Nombre
+        if name_label:
+            name_box = pick_name_box(page, name_label, dni_label)
+            if name_box:
+                write_text_centered(page, name_box, get_profile_value("nombre"))
+                info.append("[Nombre] OK")
+
+        # Fila DNI
+        for field, label_variants, key in [
+            ("DNI", DNI_LABELS, "dni"),
+            ("Email", EMAIL_LABELS, "email"),
+            ("Teléfono", TEL_LABELS, "telefono"),
+        ]:
+            label = find_first_label_rect(page, label_variants)
+            if label:
+                box = pick_box_rect_generic(page, label)
+                if box:
+                    write_text_centered(page, box, get_profile_value(key))
+                    info.append(f"[{field}] OK")
+
+        doc.save(out_path)
+        doc.close()
+
+        ULTIMO_ARCHIVO = out_path
+        download = True
+
+    return render_template_string(HTML, info="\n".join(info), download=download)
+
+@app.route("/download")
+def download_file():
+    if not ULTIMO_ARCHIVO:
+        return "No hay archivo", 404
+    return send_file(ULTIMO_ARCHIVO, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
