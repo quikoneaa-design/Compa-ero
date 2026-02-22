@@ -1,9 +1,6 @@
-# app_clean.py — Compañero V4.1.7 (Base REAL V4.1.4 + Teléfono SIN tocar geometría)
-# ✅ DNI
-# ✅ Email (anclado cerca del DNI del solicitante)
-# ✅ Teléfono (anclado cerca del Email)
-# 🔒 pick_box_rect_generic() RESTAURADA EXACTA de V4.1.4
-# Debug opcional: ?debug=1
+# app_clean.py — Compañero V4.2.1
+# 🔒 Base blindada (DNI → Email → Teléfono)
+# ➕ Nombre añadido SIN tocar la geometría ni la cadena
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -21,6 +18,7 @@ ULTIMO_ARCHIVO = None
 # PERFIL
 # ===============================
 DEFAULT_PERFIL = {
+    "nombre": "Enrique Afonso Álvarez",
     "dni": "50753101J",
     "email": "tuemailreal@dominio.com",
     "telefono": "600000000"
@@ -42,10 +40,7 @@ def load_perfil():
 PERFIL = load_perfil()
 
 def get_profile_value(key):
-    v = PERFIL.get(key, "")
-    if v is None:
-        v = ""
-    return str(v).strip()
+    return str(PERFIL.get(key, "")).strip()
 
 # ===============================
 # HTML
@@ -53,11 +48,9 @@ def get_profile_value(key):
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.7</title>
+<title>Compañero V4.2.1</title>
 
-<h2>Compañero — Motor estable (DNI + Email + Teléfono)</h2>
-
-<p>Debug: añade <b>?debug=1</b> para ver cajas.</p>
+<h2>Compañero — Motor estable (Nombre + DNI + Email + Teléfono)</h2>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
@@ -77,7 +70,7 @@ HTML = """
 """
 
 # ===============================
-# HELPERS (ORIGINAL V4.1.4)
+# HELPERS (BASE BLINDADA)
 # ===============================
 
 def find_all_label_rects(page, variants):
@@ -103,7 +96,6 @@ def iter_rectangles_from_drawings(page):
         drawings = page.get_drawings()
     except Exception:
         drawings = []
-
     for d in drawings:
         for it in d.get("items", []):
             if it and len(it) > 1 and it[0] == "re":
@@ -113,16 +105,10 @@ def iter_rectangles_from_drawings(page):
                     pass
 
 def x_overlap(a, b):
-    x0 = max(a.x0, b.x0)
-    x1 = min(a.x1, b.x1)
-    ov = x1 - x0
-    return ov if ov > 0 else 0.0
+    return max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
 
 def y_overlap(a, b):
-    y0 = max(a.y0, b.y0)
-    y1 = min(a.y1, b.y1)
-    ov = y1 - y0
-    return ov if ov > 0 else 0.0
+    return max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
 
 def text_width(text, fontsize):
     try:
@@ -212,8 +198,8 @@ def pick_label_near_anchor(page, variants, anchor_rect):
         return candidates[0] if candidates else None
 
     anchor_cy = (anchor_rect.y0 + anchor_rect.y1) / 2.0
-
     scored = []
+
     for r in candidates:
         r_cy = (r.y0 + r.y1) / 2.0
         dy = abs(r_cy - anchor_cy)
@@ -226,6 +212,11 @@ def pick_label_near_anchor(page, variants, anchor_rect):
 # ===============================
 # LABELS
 # ===============================
+NAME_LABELS = [
+    "Nom de l'entitat o persona física",
+    "Nombre de la entidad o persona física"
+]
+
 DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
 EMAIL_LABELS = ["Adreça de correu electrònic", "Dirección de correo electrónico", "Correo electrónico", "Email", "E-mail"]
 TEL_LABELS = ["Telèfon", "Teléfono", "Tel."]
@@ -240,7 +231,6 @@ def index():
 
     info_lines = []
     download = False
-    debug = request.args.get("debug", "").strip().lower() in ("1", "true", "yes", "si", "sí")
 
     if request.method == "POST":
         f = request.files.get("pdf")
@@ -254,16 +244,16 @@ def index():
         doc = fitz.open(in_path)
         page = doc[0]
 
-        # 1️⃣ DNI
+        # 🔒 Fila blindada
         dni_label = find_first_label_rect(page, DNI_LABELS)
-
-        # 2️⃣ Email cerca del DNI
         email_label = pick_label_near_anchor(page, EMAIL_LABELS, dni_label)
-
-        # 3️⃣ Teléfono cerca del Email
         tel_label = pick_label_near_anchor(page, TEL_LABELS, email_label)
 
+        # ➕ Nombre simple
+        name_label = find_first_label_rect(page, NAME_LABELS)
+
         for field_name, label_rect, value in [
+            ("Nombre", name_label, get_profile_value("nombre")),
             ("DNI", dni_label, get_profile_value("dni")),
             ("Email", email_label, get_profile_value("email")),
             ("Teléfono", tel_label, get_profile_value("telefono")),
@@ -276,10 +266,6 @@ def index():
             if not box:
                 info_lines.append(f"[{field_name}] casilla NO encontrada.")
                 continue
-
-            if debug:
-                page.draw_rect(label_rect, color=(1,0,0), width=0.8)
-                page.draw_rect(box, color=(0,0,1), width=0.8)
 
             fs = write_text_centered(page, box, value)
             info_lines.append(f"[{field_name}] OK (fontsize={fs:.1f}).")
