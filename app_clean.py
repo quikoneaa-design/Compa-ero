@@ -1,4 +1,4 @@
-# app_clean.py — V4.1.7 + BLOQUE NOMBRE AISLADO ARRIBA (Nombre alineado a la izquierda)
+# app_clean.py — V4.1.7 + Nombre izquierda limpio (sin tocar borde)
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -60,9 +60,11 @@ def get_nombre():
         try:
             with open("perfil.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
-                identidad = data.get("identidad", {})
-                if isinstance(identidad, dict):
-                    return str(identidad.get("nombre_completo", "")).strip()
+            identidad = data.get("identidad", {})
+            if isinstance(identidad, dict):
+                nombre = str(identidad.get("nombre_completo", "")).strip()
+                if nombre:
+                    return nombre
         except Exception:
             pass
     return ""
@@ -73,20 +75,15 @@ def get_nombre():
 HTML = """
 <!doctype html>
 <meta charset="utf-8">
-<title>Compañero V4.1.7 + Nombre</title>
+<title>Compañero V4.1.7</title>
 
-<h2>Compañero — Motor estable + Nombre arriba</h2>
+<h2>Compañero — Motor estable + Nombre izquierda limpio</h2>
 
 <form method="post" enctype="multipart/form-data">
   <input type="file" name="pdf" accept="application/pdf" required>
   <br><br>
   <button type="submit">Procesar PDF</button>
 </form>
-
-{% if info %}
-<hr>
-<div style="white-space: pre-wrap;">{{ info }}</div>
-{% endif %}
 
 {% if download %}
 <br>
@@ -95,7 +92,7 @@ HTML = """
 """
 
 # ===============================
-# HELPERS (ORIGINAL V4.1.4)
+# HELPERS
 # ===============================
 
 def find_all_label_rects(page, variants):
@@ -121,7 +118,6 @@ def iter_rectangles_from_drawings(page):
         drawings = page.get_drawings()
     except Exception:
         drawings = []
-
     for d in drawings:
         for it in d.get("items", []):
             if it and len(it) > 1 and it[0] == "re":
@@ -172,9 +168,7 @@ def pick_box_rect_generic(page, label_rect):
                 r_cx = (r.x0 + r.x1) / 2.0
                 col_ok = (label_rect.x0 - 12) <= r_cx <= (label_rect.x1 + 12)
                 if ovx >= (label_rect.width * 0.30) or col_ok:
-                    width_penalty = max(0.0, (r.width - MAX_W)) * 2.0
-                    size_bonus = -60.0 if is_box_sized else 0.0
-                    score = (dy + width_penalty, size_bonus, r.width, r.x0)
+                    score = (dy, r.width, r.x0)
                     below.append((score, r))
 
         if r.x0 >= (label_rect.x1 - 2):
@@ -185,7 +179,7 @@ def pick_box_rect_generic(page, label_rect):
                     continue
                 dx = r.x0 - label_rect.x1
                 dyc = abs(((r.y0 + r.y1) / 2.0) - ((label_rect.y0 + label_rect.y1) / 2.0))
-                score = (max(0.0, dx), dyc, r.width, r.x0)
+                score = (dx, dyc, r.width, r.x0)
                 right.append((score, r))
 
     if below:
@@ -223,28 +217,34 @@ def write_text_centered(page, box, text):
     return fontsize
 
 # ===============================
-# SOLO PARA NOMBRE: IZQUIERDA (NO TOCA MOTOR EXISTENTE)
+# NOMBRE IZQUIERDA LIMPIO
 # ===============================
 def write_text_left(page, box, text):
     text = (text or "").strip()
     if not text:
         return 0.0
 
-    pad_x = max(2.0, box.width * 0.06)
-    pad_y = max(0.8, box.height * 0.18)
-    inner = fitz.Rect(box.x0+pad_x, box.y0+pad_y, box.x1-pad_x, box.y1-pad_y)
+    pad_x = 2.0  # 👈 pequeño margen profesional (no toca borde)
+    pad_y = max(1.0, box.height * 0.18)
 
-    fontsize = max(6.0, min(12.5, inner.height * 0.78))
+    inner = fitz.Rect(
+        box.x0 + pad_x,
+        box.y0 + pad_y,
+        box.x1,
+        box.y1 - pad_y
+    )
 
-    for _ in range(80):
+    fontsize = max(6.5, min(12.5, inner.height * 0.78))
+
+    for _ in range(100):
         tw = text_width(text, fontsize)
         if tw <= inner.width:
             break
         fontsize -= 0.2
-        if fontsize < 5.5:
+        if fontsize < 6:
             break
 
-    x = inner.x0  # 👈 alineado a la izquierda
+    x = box.x0 + pad_x
     y = (inner.y0 + inner.y1) / 2.0 + (fontsize * 0.33)
 
     page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", overlay=True)
@@ -267,14 +267,12 @@ NAME_LABELS = [
 @app.route("/", methods=["GET", "POST"])
 def index():
     global ULTIMO_ARCHIVO
-
-    info_lines = []
     download = False
 
     if request.method == "POST":
         f = request.files.get("pdf")
         if not f or not f.filename.lower().endswith(".pdf"):
-            return render_template_string(HTML, info="Sube un PDF válido.", download=False)
+            return render_template_string(HTML, download=False)
 
         in_path = os.path.join(UPLOAD_FOLDER, "entrada.pdf")
         out_path = os.path.join(UPLOAD_FOLDER, "salida.pdf")
@@ -283,36 +281,28 @@ def index():
         doc = fitz.open(in_path)
         page = doc[0]
 
-        # ===== BLOQUE NOMBRE AISLADO =====
         name_label = find_first_label_rect(page, NAME_LABELS)
         dni_label = find_first_label_rect(page, DNI_LABELS)
-
-        if name_label and dni_label:
-            candidatos = []
-            for r in iter_rectangles_from_drawings(page):
-                if name_label.y1 < r.y0 < dni_label.y0:
-                    candidatos.append(r)
-
-            if candidatos:
-                candidatos.sort(key=lambda r: r.width, reverse=True)
-                # ✅ ÚNICO CAMBIO: NOMBRE A LA IZQUIERDA
-                write_text_left(page, candidatos[0], get_nombre())
-
-        # ===== BLOQUE ORIGINAL =====
         email_label = find_first_label_rect(page, EMAIL_LABELS)
         tel_label = find_first_label_rect(page, TEL_LABELS)
 
-        for field_name, label_rect, value in [
-            ("DNI", dni_label, get_profile_value("dni")),
-            ("Email", email_label, get_profile_value("email")),
-            ("Teléfono", tel_label, get_profile_value("telefono")),
+        # Nombre (caja grande arriba)
+        if name_label:
+            for r in iter_rectangles_from_drawings(page):
+                if r.width > page.rect.width * 0.55 and r.y0 > name_label.y1 - 1:
+                    write_text_left(page, r, get_nombre())
+                    break
+
+        # Fila DNI / Email / Tel (blindado)
+        for label_rect, value in [
+            (dni_label, get_profile_value("dni")),
+            (email_label, get_profile_value("email")),
+            (tel_label, get_profile_value("telefono")),
         ]:
-            if not label_rect:
-                continue
-            box = pick_box_rect_generic(page, label_rect)
-            if not box:
-                continue
-            write_text_centered(page, box, value)
+            if label_rect:
+                box = pick_box_rect_generic(page, label_rect)
+                if box:
+                    write_text_centered(page, box, value)
 
         doc.save(out_path)
         doc.close()
@@ -320,15 +310,10 @@ def index():
         ULTIMO_ARCHIVO = out_path
         download = True
 
-    return render_template_string(
-        HTML,
-        info="\n".join(info_lines) if info_lines else None,
-        download=download
-    )
+    return render_template_string(HTML, download=download)
 
 @app.route("/download")
 def download_file():
-    global ULTIMO_ARCHIVO
     if not ULTIMO_ARCHIVO:
         return "No hay archivo.", 404
     return send_file(ULTIMO_ARCHIVO, as_attachment=True)
