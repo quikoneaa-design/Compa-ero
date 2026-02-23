@@ -1,4 +1,4 @@
-# app_clean.py — V4.1.7 + BLOQUE NOMBRE AISLADO ARRIBA
+# app_clean.py — V4.1.7 + BLOQUE NOMBRE AISLADO ARRIBA (Nombre alineado a la izquierda)
 
 from flask import Flask, request, render_template_string, send_file
 import os
@@ -223,6 +223,34 @@ def write_text_centered(page, box, text):
     return fontsize
 
 # ===============================
+# SOLO PARA NOMBRE: IZQUIERDA (NO TOCA MOTOR EXISTENTE)
+# ===============================
+def write_text_left(page, box, text):
+    text = (text or "").strip()
+    if not text:
+        return 0.0
+
+    pad_x = max(2.0, box.width * 0.06)
+    pad_y = max(0.8, box.height * 0.18)
+    inner = fitz.Rect(box.x0+pad_x, box.y0+pad_y, box.x1-pad_x, box.y1-pad_y)
+
+    fontsize = max(6.0, min(12.5, inner.height * 0.78))
+
+    for _ in range(80):
+        tw = text_width(text, fontsize)
+        if tw <= inner.width:
+            break
+        fontsize -= 0.2
+        if fontsize < 5.5:
+            break
+
+    x = inner.x0  # 👈 alineado a la izquierda
+    y = (inner.y0 + inner.y1) / 2.0 + (fontsize * 0.33)
+
+    page.insert_text((x, y), text, fontsize=fontsize, fontname="helv", overlay=True)
+    return fontsize
+
+# ===============================
 # LABELS
 # ===============================
 DNI_LABELS = ["DNI-NIF", "DNI - NIF", "DNI/NIF", "DNI o NIF", "DNI", "NIF"]
@@ -267,7 +295,8 @@ def index():
 
             if candidatos:
                 candidatos.sort(key=lambda r: r.width, reverse=True)
-                write_text_centered(page, candidatos[0], get_nombre())
+                # ✅ ÚNICO CAMBIO: NOMBRE A LA IZQUIERDA
+                write_text_left(page, candidatos[0], get_nombre())
 
         # ===== BLOQUE ORIGINAL =====
         email_label = find_first_label_rect(page, EMAIL_LABELS)
